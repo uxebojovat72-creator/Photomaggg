@@ -27,7 +27,11 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
+
+      # shared must be built before api can typecheck (path alias resolution)
+      - name: Build shared package
+        run: pnpm --filter @priceradar/shared build
 
       - name: Lint
         run: pnpm lint
@@ -85,7 +89,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build shared package
         run: pnpm --filter @priceradar/shared build
@@ -116,7 +120,10 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter @priceradar/shared build
 
       - name: Build all packages
         run: pnpm build
