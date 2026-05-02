@@ -12,7 +12,8 @@
       "persistent": true
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "env": ["DATABASE_URL", "REDIS_URL", "JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET", "NODE_ENV"]
     },
     "lint": {},
     "typecheck": {
