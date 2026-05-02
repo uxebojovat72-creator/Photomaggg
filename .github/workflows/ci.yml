@@ -8,7 +8,6 @@ on:
 
 env:
   NODE_VERSION: "20"
-  PNPM_VERSION: "9"
 
 jobs:
   lint-typecheck:
@@ -18,8 +17,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
+        # reads "packageManager" from package.json — no version conflict
 
       - uses: actions/setup-node@v4
         with:
@@ -29,7 +27,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      # shared must be built before api can typecheck (path alias resolution)
       - name: Build shared package
         run: pnpm --filter @priceradar/shared build
 
@@ -80,8 +77,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
@@ -111,8 +106,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
