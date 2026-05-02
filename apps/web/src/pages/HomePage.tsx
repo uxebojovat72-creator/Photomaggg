@@ -71,7 +71,7 @@ export default function HomePage() {
 
   useEffect(() => {
     pricesApi.getFeed({ limit: 20 })
-      .then((res) => setFeed(res.data))
+      .then((res) => setFeed(Array.isArray(res?.data) ? res.data : []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);

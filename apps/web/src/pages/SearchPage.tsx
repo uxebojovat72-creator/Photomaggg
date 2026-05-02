@@ -63,7 +63,7 @@ export default function SearchPage() {
     setLoading(true);
     setPage(1);
     productsApi.search({ q: debouncedQuery, page: 1, limit: 20 })
-      .then((res) => { setResults(res.data); setTotal(res.meta.total); })
+      .then((res) => { setResults(Array.isArray(res?.data) ? res.data : []); setTotal(res?.meta?.total ?? 0); })
       .catch(() => {})
       .finally(() => setLoading(false));
     setSearchParams({ q: debouncedQuery }, { replace: true });
