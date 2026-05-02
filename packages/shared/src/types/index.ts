@@ -193,7 +193,7 @@ export interface FeedItem extends Price {
 export interface ModerationItem extends Price {
   product: Product;
   store: Store & { city: City & { country: Country } };
-  user: Pick<User, "id" | "displayName" | "trustScore">;
+  user: Pick<User, "id" | "displayName" | "avatarUrl" | "trustScore">;
 }
 
 export type ModerationAction = "approve" | "reject" | "edit";
