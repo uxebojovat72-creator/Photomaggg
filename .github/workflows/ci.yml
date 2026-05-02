@@ -22,10 +22,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          # no cache: "pnpm" — requires pnpm-lock.yaml which is not committed yet
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build shared package
         run: pnpm --filter @priceradar/shared build
@@ -86,12 +86,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build shared package
         run: pnpm --filter @priceradar/shared build
+
+      - name: Generate Prisma client
+        run: pnpm --filter api prisma:generate
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
 
       - name: Run DB migrations
         run: pnpm --filter api prisma migrate deploy
@@ -114,12 +120,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build shared package
         run: pnpm --filter @priceradar/shared build
+
+      - name: Generate Prisma client
+        run: pnpm --filter api prisma:generate
+        env:
+          DATABASE_URL: "postgresql://placeholder:placeholder@localhost:5432/placeholder"
 
       - name: Build all packages
         run: pnpm build
