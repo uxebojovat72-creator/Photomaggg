@@ -30,6 +30,11 @@ jobs:
       - name: Build shared package
         run: pnpm --filter @priceradar/shared build
 
+      - name: Generate Prisma client
+        run: pnpm --filter api prisma:generate
+        env:
+          DATABASE_URL: "postgresql://placeholder:placeholder@localhost:5432/placeholder"
+
       - name: Lint
         run: pnpm lint
 

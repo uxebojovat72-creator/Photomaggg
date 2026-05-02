@@ -77,9 +77,7 @@ export async function deletePhoto(path: string): Promise<void> {
       }
     );
   } else {
-    const nodePath = await import("node:path");
-    const fs = await import("node:fs/promises");
-    const fullPath = nodePath.default.join(process.cwd(), "uploads", path);
-    await fs.default.unlink(fullPath).catch(() => {});
+    const fullPath = nodePath.join(process.cwd(), "uploads", path);
+    await fs.unlink(fullPath).catch(() => {});
   }
 }
