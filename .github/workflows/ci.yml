@@ -99,8 +99,8 @@ jobs:
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
 
-      - name: Run DB migrations
-        run: pnpm --filter api prisma migrate deploy
+      - name: Push DB schema
+        run: pnpm --filter api exec prisma db push --skip-generate --accept-data-loss
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
 
