@@ -1,0 +1,248 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  guest
+  user
+  trusted
+  moderator
+  admin
+}
+
+enum PriceStatus {
+  pending
+  approved
+  rejected
+}
+
+enum NotificationType {
+  price_drop
+  new_price
+  moderation
+  system
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  displayName  String    @map("display_name")
+  avatarUrl    String?   @map("avatar_url")
+  role         UserRole  @default(user)
+  trustScore   Int       @default(0) @map("trust_score")
+  countryId    String?   @map("country_id")
+  cityId       String?   @map("city_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  country       Country?       @relation(fields: [countryId], references: [id])
+  city          City?          @relation(fields: [cityId], references: [id])
+  prices        Price[]        @relation("UserPrices")
+  moderatedPrices Price[]      @relation("ModeratorPrices")
+  stores        Store[]
+  favorites     Favorite[]
+  notifications Notification[]
+  priceReports  PriceReport[]
+  products      Product[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Country {
+  id           String  @id @default(uuid())
+  name         String
+  code         String  @unique @db.Char(2)
+  currencyCode String  @map("currency_code") @db.Char(3)
+  flagEmoji    String? @map("flag_emoji")
+
+  cities City[]
+  users  User[]
+  stores Store[]
+
+  @@map("countries")
+}
+
+model City {
+  id        String   @id @default(uuid())
+  name      String
+  countryId String   @map("country_id")
+  latitude  Decimal? @db.Decimal(9, 6)
+  longitude Decimal? @db.Decimal(9, 6)
+
+  country Country @relation(fields: [countryId], references: [id])
+  stores  Store[]
+  users   User[]
+
+  @@map("cities")
+}
+
+model Store {
+  id        String   @id @default(uuid())
+  name      String
+  chainName String?  @map("chain_name")
+  cityId    String   @map("city_id")
+  address   String?
+  latitude  Decimal? @db.Decimal(9, 6)
+  longitude Decimal? @db.Decimal(9, 6)
+  createdBy String   @map("created_by")
+  verified  Boolean  @default(false)
+  countryId String?  @map("country_id")
+
+  city    City     @relation(fields: [cityId], references: [id])
+  country Country? @relation(fields: [countryId], references: [id])
+  creator User     @relation(fields: [createdBy], references: [id])
+  prices  Price[]
+
+  @@map("stores")
+}
+
+model Category {
+  id       String  @id @default(uuid())
+  name     String
+  parentId String? @map("parent_id")
+  iconUrl  String? @map("icon_url")
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  name        String
+  brand       String?
+  barcode     String?  @unique
+  categoryId  String?  @map("category_id")
+  imageUrl    String?  @map("image_url")
+  aiGenerated Boolean  @default(false) @map("ai_generated")
+  aiConfirmed Boolean  @default(false) @map("ai_confirmed")
+  aliases     String[] @default([])
+  createdBy   String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  category  Category?  @relation(fields: [categoryId], references: [id])
+  creator   User       @relation(fields: [createdBy], references: [id])
+  prices    Price[]
+  favorites Favorite[]
+
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "products_name_gin")
+  @@map("products")
+}
+
+model Price {
+  id               String      @id @default(uuid())
+  productId        String      @map("product_id")
+  storeId          String      @map("store_id")
+  userId           String      @map("user_id")
+  price            Decimal     @db.Decimal(12, 2)
+  currencyCode     String      @map("currency_code") @db.Char(3)
+  priceUsd         Decimal?    @map("price_usd") @db.Decimal(12, 2)
+  photoUrl         String?     @map("photo_url")
+  aiRecognizedName String?     @map("ai_recognized_name")
+  status           PriceStatus @default(pending)
+  rejectReason     String?     @map("reject_reason")
+  moderatedBy      String?     @map("moderated_by")
+  moderatedAt      DateTime?   @map("moderated_at")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  deletedAt        DateTime?   @map("deleted_at")
+
+  product   Product       @relation(fields: [productId], references: [id])
+  store     Store         @relation(fields: [storeId], references: [id])
+  user      User          @relation("UserPrices", fields: [userId], references: [id])
+  moderator User?         @relation("ModeratorPrices", fields: [moderatedBy], references: [id])
+  reports   PriceReport[]
+
+  @@index([productId, storeId, createdAt])
+  @@index([status])
+  @@index([userId])
+  @@map("prices")
+}
+
+model PriceReport {
+  id         String   @id @default(uuid())
+  priceId    String   @map("price_id")
+  reporterId String   @map("reporter_id")
+  reason     String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  price    Price @relation(fields: [priceId], references: [id])
+  reporter User  @relation(fields: [reporterId], references: [id])
+
+  @@map("price_reports")
+}
+
+model Favorite {
+  id                  String   @id @default(uuid())
+  userId              String   @map("user_id")
+  productId           String   @map("product_id")
+  priceAlertThreshold Decimal? @map("price_alert_threshold") @db.Decimal(12, 2)
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("favorites")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  body      String
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+model CurrencyRate {
+  id        String   @id @default(uuid())
+  base      String   @default("USD")
+  rates     Json
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("currency_rates")
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
