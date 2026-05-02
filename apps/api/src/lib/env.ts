@@ -27,6 +27,10 @@ export const env = {
   HUGGINGFACE_MODEL: process.env.HUGGINGFACE_MODEL ?? "Salesforce/blip-image-captioning-large",
   GOOGLE_CLOUD_VISION_API_KEY: process.env.GOOGLE_CLOUD_VISION_API_KEY ?? "",
 
+  SUPABASE_URL: process.env.SUPABASE_URL ?? "",
+  SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY ?? "",
+  SUPABASE_STORAGE_BUCKET: process.env.SUPABASE_STORAGE_BUCKET ?? "photos",
+
   EXCHANGE_RATE_API_URL: process.env.EXCHANGE_RATE_API_URL ?? "https://api.exchangerate.host/latest",
 
   VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY ?? "",
