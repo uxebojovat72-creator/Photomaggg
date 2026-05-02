@@ -6,6 +6,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 const HomePage = lazy(() => import("@/pages/HomePage"));
 const LoginPage = lazy(() => import("@/pages/LoginPage"));
 const RegisterPage = lazy(() => import("@/pages/RegisterPage"));
+const SearchPage = lazy(() => import("@/pages/SearchPage"));
+const ProductPage = lazy(() => import("@/pages/ProductPage"));
+const AddPricePage = lazy(() => import("@/pages/AddPricePage"));
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage"));
 
 function PageLoader() {
@@ -29,11 +32,11 @@ export default function App() {
         {/* App routes (with layout) */}
         <Route element={<AppLayout />}>
           <Route path="/" element={<HomePage />} />
-          <Route path="/search" element={<PageLoader />} />
-          <Route path="/add-price" element={<PageLoader />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/add-price" element={<AddPricePage />} />
+          <Route path="/products/:id" element={<ProductPage />} />
           <Route path="/analytics" element={<PageLoader />} />
           <Route path="/profile" element={<PageLoader />} />
-          <Route path="/products/:id" element={<PageLoader />} />
           <Route path="/notifications" element={<PageLoader />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
