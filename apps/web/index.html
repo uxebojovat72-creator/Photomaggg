@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Apply theme before first paint to avoid FOUC -->
+    <script>
+      try {
+        var s = localStorage.getItem("priceradar-ui");
+        var t = s ? JSON.parse(s).state?.theme : null;
+        if (t === "light") document.documentElement.classList.remove("dark");
+        else document.documentElement.classList.add("dark");
+      } catch (e) {
+        document.documentElement.classList.add("dark");
+      }
+    </script>
     <meta name="theme-color" content="#6366f1" />
     <meta name="description" content="Compare prices worldwide. One person photographs — thousands save." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
