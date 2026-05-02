@@ -11,6 +11,11 @@ import rateLimitPlugin from "./plugins/rateLimit.js";
 
 import authRoutes from "./routes/auth.js";
 import geoRoutes from "./routes/geo.js";
+import productRoutes from "./routes/products.js";
+import priceRoutes from "./routes/prices.js";
+import storeRoutes from "./routes/stores.js";
+import aiRoutes from "./routes/ai.js";
+import currencyRoutes from "./routes/currencies.js";
 
 import { env } from "./lib/env.js";
 import { prisma } from "./lib/prisma.js";
@@ -62,6 +67,11 @@ await fastify.register(fastifySwaggerUi, {
 
 await fastify.register(authRoutes, { prefix: "/auth" });
 await fastify.register(geoRoutes, { prefix: "/geo" });
+await fastify.register(productRoutes, { prefix: "/products" });
+await fastify.register(priceRoutes, { prefix: "/prices" });
+await fastify.register(storeRoutes, { prefix: "/stores" });
+await fastify.register(aiRoutes, { prefix: "/ai" });
+await fastify.register(currencyRoutes, { prefix: "/currencies" });
 
 // Health check
 fastify.get("/health", async () => ({
