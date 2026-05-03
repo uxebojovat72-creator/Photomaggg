@@ -20,17 +20,17 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (form.password.length < 8) {
-      toast({ title: "Error", description: "Password must be at least 8 characters", variant: "destructive" });
+      toast({ title: "Ошибка", description: "Пароль должен содержать минимум 8 символов", variant: "destructive" });
       return;
     }
     setLoading(true);
     try {
       const data = await authApi.register(form);
       setAuth(data.user, data.accessToken);
-      toast({ title: "Welcome to PriceRadar!", description: "Your account is ready." });
+      toast({ title: "Добро пожаловать в PriceRadar!", description: "Ваш аккаунт создан." });
       navigate("/");
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Registration failed";
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Ошибка регистрации";
       toast({ title: "Error", description: msg, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -42,15 +42,15 @@ export default function RegisterPage() {
       <Card className="w-full max-w-sm animate-slide-up">
         <CardHeader className="text-center">
           <div className="text-4xl mb-2">📡</div>
-          <CardTitle className="text-2xl">Create account</CardTitle>
-          <p className="text-muted-foreground text-sm">Join the global price community</p>
+          <CardTitle className="text-2xl">Создать аккаунт</CardTitle>
+          <p className="text-muted-foreground text-sm">Присоединяйтесь к мировому сообществу</p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Name</label>
+              <label className="text-sm font-medium">Имя</label>
               <Input
-                placeholder="Your name"
+                placeholder="Ваше имя"
                 value={form.displayName}
                 onChange={set("displayName")}
                 required
@@ -58,7 +58,7 @@ export default function RegisterPage() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Email</label>
+              <label className="text-sm font-medium">Эл. почта</label>
               <Input
                 type="email"
                 placeholder="you@example.com"
@@ -68,10 +68,10 @@ export default function RegisterPage() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Password</label>
+              <label className="text-sm font-medium">Пароль</label>
               <Input
                 type="password"
-                placeholder="Min. 8 characters"
+                placeholder="Мин. 8 символов"
                 value={form.password}
                 onChange={set("password")}
                 required
@@ -79,13 +79,13 @@ export default function RegisterPage() {
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-              Create Account
+              Создать аккаунт
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
-            Already have an account?{" "}
+            Уже есть аккаунт?{" "}
             <Link to="/login" className="text-primary font-medium hover:underline">
-              Sign in
+              Войти
             </Link>
           </p>
         </CardContent>

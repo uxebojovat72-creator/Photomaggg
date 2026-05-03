@@ -3,11 +3,11 @@ import { Home, Search, PlusCircle, BarChart2, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { to: "/", icon: Home, label: "Home" },
-  { to: "/search", icon: Search, label: "Search" },
-  { to: "/add-price", icon: PlusCircle, label: "Add", primary: true },
-  { to: "/analytics", icon: BarChart2, label: "Analytics" },
-  { to: "/profile", icon: User, label: "Profile" },
+  { to: "/", icon: Home, label: "Главная" },
+  { to: "/search", icon: Search, label: "Поиск" },
+  { to: "/add-price", icon: PlusCircle, label: "Добавить", primary: true },
+  { to: "/analytics", icon: BarChart2, label: "Аналитика" },
+  { to: "/profile", icon: User, label: "Профиль" },
 ];
 
 export function BottomNav() {

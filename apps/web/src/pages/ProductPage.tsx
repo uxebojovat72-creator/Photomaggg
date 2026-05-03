@@ -66,8 +66,8 @@ export default function ProductPage() {
   if (!product) return (
     <div className="text-center py-20">
       <p className="text-4xl mb-3">📦</p>
-      <p className="font-medium">Product not found</p>
-      <Button className="mt-4" onClick={() => navigate(-1)}>Go Back</Button>
+      <p className="font-medium">Товар не найден</p>
+      <Button className="mt-4" onClick={() => navigate(-1)}>Назад</Button>
     </div>
   );
 
@@ -77,7 +77,7 @@ export default function ProductPage() {
   const maxUsd = usdPrices.length ? Math.max(...usdPrices) : null;
 
   const chartData = history.map((p) => ({
-    date: new Date(p.date).toLocaleDateString("en", { month: "short", day: "numeric" }),
+    date: new Date(p.date).toLocaleDateString("ru", { month: "short", day: "numeric" }),
     price: p.priceUsd,
   }));
 
@@ -104,17 +104,17 @@ export default function ProductPage() {
       {usdPrices.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-lg border bg-card p-3 text-center">
-            <p className="text-xs text-muted-foreground">Min price</p>
+            <p className="text-xs text-muted-foreground">Мин. цена</p>
             <p className="font-bold text-emerald-400">{formatPrice(minUsd!, "USD")}</p>
           </div>
           <div className="rounded-lg border bg-card p-3 text-center">
-            <p className="text-xs text-muted-foreground">Avg price</p>
+            <p className="text-xs text-muted-foreground">Ср. цена</p>
             <p className="font-bold">
               {formatPrice(usdPrices.reduce((a, b) => a + b, 0) / usdPrices.length, "USD")}
             </p>
           </div>
           <div className="rounded-lg border bg-card p-3 text-center">
-            <p className="text-xs text-muted-foreground">Max price</p>
+            <p className="text-xs text-muted-foreground">Макс. цена</p>
             <p className="font-bold text-red-400">{formatPrice(maxUsd!, "USD")}</p>
           </div>
         </div>
@@ -123,7 +123,7 @@ export default function ProductPage() {
       {/* Price history chart */}
       <div className="rounded-xl border bg-card p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm">Price History</h2>
+          <h2 className="font-semibold text-sm">История цен</h2>
           <div className="flex gap-1">
             {([7, 30, 90] as Days[]).map((d) => (
               <button
@@ -147,14 +147,14 @@ export default function ProductPage() {
               <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
               <Tooltip
                 contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
-                formatter={(v: number) => [formatPrice(v, "USD"), "Price"]}
+                formatter={(v: number) => [formatPrice(v, "USD"), "Цена"]}
               />
               <Line type="monotone" dataKey="price" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         ) : (
           <div className="h-[180px] flex items-center justify-center text-muted-foreground text-sm">
-            No price history for this period
+            Нет истории цен за этот период
           </div>
         )}
       </div>
@@ -162,16 +162,16 @@ export default function ProductPage() {
       {/* Prices by store */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm">Prices by Store</h2>
-          <Badge variant="outline">{approvedPrices.length} records</Badge>
+          <h2 className="font-semibold text-sm">Цены по магазинам</h2>
+          <Badge variant="outline">{approvedPrices.length} записей</Badge>
         </div>
 
         {approvedPrices.length === 0 ? (
           <div className="rounded-xl border bg-card p-6 text-center text-muted-foreground">
             <p className="text-3xl mb-2">🏪</p>
-            <p className="text-sm">No prices yet</p>
+            <p className="text-sm">Цен пока нет</p>
             <Button size="sm" className="mt-3" onClick={() => navigate("/add-price", { state: { productId: product.id, productName: product.name } })}>
-              Add First Price
+              Добавить первую цену
             </Button>
           </div>
         ) : (
@@ -212,7 +212,7 @@ export default function ProductPage() {
         className="w-full"
         onClick={() => navigate("/add-price", { state: { productId: product.id, productName: product.name } })}
       >
-        + Add Your Price
+        + Добавить свою цену
       </Button>
     </div>
   );

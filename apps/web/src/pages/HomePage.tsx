@@ -83,13 +83,13 @@ export default function HomePage() {
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2">
             <TrendingDown className="h-5 w-5 text-primary" />
-            Latest Prices
+            Последние цены
           </h1>
-          <p className="text-xs text-muted-foreground">Updated in real-time worldwide</p>
+          <p className="text-xs text-muted-foreground">Обновляется в реальном времени</p>
         </div>
         <Button size="sm" onClick={() => navigate("/add-price")}>
           <PlusCircle className="h-4 w-4" />
-          Add Price
+          Добавить цену
         </Button>
       </div>
 
@@ -101,10 +101,10 @@ export default function HomePage() {
           ? (
             <div className="text-center py-12 text-muted-foreground">
               <p className="text-4xl mb-3">📭</p>
-              <p className="font-medium">No prices yet</p>
-              <p className="text-sm">Be the first to add a price!</p>
+              <p className="font-medium">Пока нет цен</p>
+              <p className="text-sm">Будьте первым, кто добавит цену!</p>
               <Button className="mt-4" onClick={() => navigate("/add-price")}>
-                Add First Price
+                Добавить первую цену
               </Button>
             </div>
           )

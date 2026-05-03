@@ -23,7 +23,7 @@ export default function LoginPage() {
       setAuth(data.user, data.accessToken);
       navigate("/");
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Login failed";
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Ошибка входа";
       toast({ title: "Error", description: msg, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -35,13 +35,13 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm animate-slide-up">
         <CardHeader className="text-center">
           <div className="text-4xl mb-2">📡</div>
-          <CardTitle className="text-2xl">Welcome back</CardTitle>
-          <p className="text-muted-foreground text-sm">Sign in to PriceRadar</p>
+          <CardTitle className="text-2xl">С возвращением</CardTitle>
+          <p className="text-muted-foreground text-sm">Войдите в PriceRadar</p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Email</label>
+              <label className="text-sm font-medium">Эл. почта</label>
               <Input
                 type="email"
                 placeholder="you@example.com"
@@ -52,7 +52,7 @@ export default function LoginPage() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Password</label>
+              <label className="text-sm font-medium">Пароль</label>
               <Input
                 type="password"
                 placeholder="••••••••"
@@ -64,13 +64,13 @@ export default function LoginPage() {
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-              Sign In
+              Войти
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
-            No account?{" "}
+            Нет аккаунта?{" "}
             <Link to="/register" className="text-primary font-medium hover:underline">
-              Register
+              Зарегистрироваться
             </Link>
           </p>
         </CardContent>

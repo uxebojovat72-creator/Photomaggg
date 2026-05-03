@@ -94,7 +94,7 @@ export default function SearchPage() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           ref={inputRef}
-          placeholder="Search products, brands, barcodes..."
+          placeholder="Поиск товаров, брендов, штрихкодов..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setShowSuggestions(true)}
@@ -132,7 +132,7 @@ export default function SearchPage() {
       {debouncedQuery && !loading && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">
-            {total > 0 ? `${total} product${total !== 1 ? "s" : ""} found` : "No products found"}
+            {total > 0 ? `Найдено ${total} товар${total === 1 ? "" : total < 5 ? "а" : "ов"}` : "Ничего не найдено"}
           </p>
         </div>
       )}
@@ -159,8 +159,8 @@ export default function SearchPage() {
       {!loading && debouncedQuery && results.length === 0 && (
         <div className="text-center py-12">
           <p className="text-4xl mb-3">🔍</p>
-          <p className="font-medium">No products found</p>
-          <p className="text-sm text-muted-foreground mt-1">Try a different search term</p>
+          <p className="font-medium">Ничего не найдено</p>
+          <p className="text-sm text-muted-foreground mt-1">Попробуйте другой запрос</p>
         </div>
       )}
 
@@ -168,15 +168,15 @@ export default function SearchPage() {
       {!debouncedQuery && (
         <div className="text-center py-12 text-muted-foreground">
           <p className="text-4xl mb-3">🛒</p>
-          <p className="font-medium">Search for any product</p>
-          <p className="text-sm mt-1">Type at least 3 characters for suggestions</p>
+          <p className="font-medium">Найдите любой товар</p>
+          <p className="text-sm mt-1">Введите минимум 3 символа для подсказок</p>
         </div>
       )}
 
       {/* Load more */}
       {results.length < total && !loading && (
         <Button variant="outline" className="w-full" onClick={loadMore}>
-          Load more ({total - results.length} remaining)
+          Загрузить ещё ({total - results.length} осталось)
         </Button>
       )}
     </div>

@@ -49,7 +49,7 @@ export default function AddPricePage() {
   // Redirect to login if not authenticated
   useEffect(() => {
     if (!isAuthenticated) {
-      toast({ title: "Sign in required", description: "Please login to add prices", variant: "destructive" });
+      toast({ title: "Требуется вход", description: "Войдите, чтобы добавить цены", variant: "destructive" });
       navigate("/login", { state: { from: "/add-price" } });
     }
   }, [isAuthenticated, navigate]);
@@ -112,7 +112,7 @@ export default function AddPricePage() {
     if (!selectedProduct || !selectedStore || !price) return;
     const priceNum = parseFloat(price);
     if (isNaN(priceNum) || priceNum <= 0) {
-      toast({ title: "Invalid price", description: "Please enter a valid price", variant: "destructive" });
+      toast({ title: "Неверная цена", description: "Введите корректную цену", variant: "destructive" });
       return;
     }
 
@@ -133,8 +133,8 @@ export default function AddPricePage() {
 
       setStep("done");
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Failed to publish";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Не удалось опубликовать";
+      toast({ title: "Ошибка", description: msg, variant: "destructive" });
     } finally {
       setPublishing(false);
     }
@@ -149,8 +149,8 @@ export default function AddPricePage() {
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)}><ArrowLeft className="h-5 w-5" /></Button>
         <div>
-          <h1 className="font-bold">Add Price</h1>
-          <p className="text-xs text-muted-foreground">Step 1 of 4 — Photo</p>
+          <h1 className="font-bold">Добавить цену</h1>
+          <p className="text-xs text-muted-foreground">Шаг 1 из 4 — Фото</p>
         </div>
       </div>
 
@@ -177,7 +177,7 @@ export default function AddPricePage() {
         ) : (
           <div className="aspect-[4/3] flex flex-col items-center justify-center gap-4 text-muted-foreground">
             <Camera className="h-12 w-12 opacity-30" />
-            <p className="text-sm">Take a photo of the price tag</p>
+            <p className="text-sm">Сфотографируйте ценник</p>
           </div>
         )}
       </div>
@@ -188,16 +188,16 @@ export default function AddPricePage() {
 
       <div className="grid grid-cols-2 gap-3">
         <Button className="gap-2" onClick={startCamera} disabled={cam.isActive}>
-          <Camera className="h-4 w-4" /> Open Camera
+          <Camera className="h-4 w-4" /> Открыть камеру
         </Button>
         <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()}>
-          <Upload className="h-4 w-4" /> Upload Photo
+          <Upload className="h-4 w-4" /> Загрузить фото
         </Button>
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
       </div>
 
       <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("product")}>
-        Skip photo → enter manually
+        Пропустить фото → ввести вручную
       </Button>
     </div>
   );
@@ -207,8 +207,8 @@ export default function AddPricePage() {
   if (step === "ai") return (
     <div className="max-w-lg mx-auto px-4 py-20 flex flex-col items-center gap-4">
       <Loader2 className="h-10 w-10 animate-spin text-primary" />
-      <p className="font-medium">AI is recognizing the product...</p>
-      <p className="text-sm text-muted-foreground">Usually takes less than 2 seconds</p>
+      <p className="font-medium">ИИ распознаёт товар...</p>
+      <p className="text-sm text-muted-foreground">Обычно занимает менее 2 секунд</p>
       {cam.capturedUrl && (
         <img src={cam.capturedUrl} alt="" className="h-32 w-32 rounded-xl object-cover border mt-2" />
       )}
@@ -222,18 +222,18 @@ export default function AddPricePage() {
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => setStep("photo")}><ArrowLeft className="h-5 w-5" /></Button>
         <div>
-          <h1 className="font-bold">Select Product</h1>
-          <p className="text-xs text-muted-foreground">Step 2 of 4</p>
+          <h1 className="font-bold">Выбрать товар</h1>
+          <p className="text-xs text-muted-foreground">Шаг 2 из 4</p>
         </div>
       </div>
 
       {aiResult?.name && (
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-          <p className="text-xs text-primary font-medium mb-1">AI detected:</p>
+          <p className="text-xs text-primary font-medium mb-1">ИИ определил:</p>
           <p className="font-medium">{aiResult.name}</p>
           {aiResult.brand && <p className="text-sm text-muted-foreground">{aiResult.brand}</p>}
           <Badge variant="outline" className="mt-1 text-[10px]">
-            {Math.round(aiResult.confidence * 100)}% confidence · {aiResult.provider}
+            {Math.round(aiResult.confidence * 100)}% уверенность · {aiResult.provider}
           </Badge>
         </div>
       )}
@@ -241,7 +241,7 @@ export default function AddPricePage() {
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search product name..."
+          placeholder="Поиск по названию товара..."
           value={productQuery}
           onChange={(e) => setProductQuery(e.target.value)}
           className="pl-9"
@@ -269,7 +269,7 @@ export default function AddPricePage() {
       </div>
 
       {productQuery.length >= 2 && productResults.length === 0 && (
-        <p className="text-sm text-muted-foreground text-center py-4">No products found — it will be created automatically</p>
+        <p className="text-sm text-muted-foreground text-center py-4">Товар не найден — он будет создан автоматически</p>
       )}
 
       {productQuery.length >= 2 && (
@@ -280,7 +280,7 @@ export default function AddPricePage() {
             setStep("store");
           }}
         >
-          Use "{productQuery}" as product name
+          Использовать «{productQuery}» как название
         </Button>
       )}
     </div>
@@ -293,15 +293,15 @@ export default function AddPricePage() {
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => setStep("product")}><ArrowLeft className="h-5 w-5" /></Button>
         <div>
-          <h1 className="font-bold">Select Store</h1>
-          <p className="text-xs text-muted-foreground">Step 3 of 4 — {selectedProduct?.name}</p>
+          <h1 className="font-bold">Выбрать магазин</h1>
+          <p className="text-xs text-muted-foreground">Шаг 3 из 4 — {selectedProduct?.name}</p>
         </div>
       </div>
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Store name, city..."
+          placeholder="Название магазина, город..."
           value={storeQuery}
           onChange={(e) => setStoreQuery(e.target.value)}
           className="pl-9"
@@ -330,7 +330,7 @@ export default function AddPricePage() {
       </div>
 
       {storeQuery.length >= 2 && storeResults.length === 0 && (
-        <p className="text-sm text-muted-foreground text-center py-4">Store not found. It will be added as new.</p>
+        <p className="text-sm text-muted-foreground text-center py-4">Магазин не найден. Будет добавлен как новый.</p>
       )}
     </div>
   );
@@ -342,19 +342,19 @@ export default function AddPricePage() {
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => setStep("store")}><ArrowLeft className="h-5 w-5" /></Button>
         <div>
-          <h1 className="font-bold">Enter Price</h1>
-          <p className="text-xs text-muted-foreground">Step 4 of 4</p>
+          <h1 className="font-bold">Введите цену</h1>
+          <p className="text-xs text-muted-foreground">Шаг 4 из 4</p>
         </div>
       </div>
 
       {/* Summary */}
       <div className="rounded-lg border bg-card p-3 space-y-1.5">
         <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Product</span>
+          <span className="text-muted-foreground">Товар</span>
           <span className="font-medium truncate ml-4 max-w-[60%] text-right">{selectedProduct?.name}</span>
         </div>
         <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Store</span>
+          <span className="text-muted-foreground">Магазин</span>
           <span className="font-medium">{selectedStore?.name}, {selectedStore?.city.name} {selectedStore?.city.country.flagEmoji}</span>
         </div>
         {cam.capturedUrl && (
@@ -364,7 +364,7 @@ export default function AddPricePage() {
 
       {/* Price input */}
       <div className="space-y-2">
-        <label className="text-sm font-medium">Price</label>
+        <label className="text-sm font-medium">Цена</label>
         <div className="flex gap-2">
           <Input
             type="number"
@@ -391,7 +391,7 @@ export default function AddPricePage() {
         onClick={handlePublish}
         disabled={publishing || !price}
       >
-        {publishing ? <Loader2 className="h-5 w-5 animate-spin" /> : "Publish Price"}
+        {publishing ? <Loader2 className="h-5 w-5 animate-spin" /> : "Опубликовать цену"}
       </Button>
     </div>
   );
@@ -401,14 +401,14 @@ export default function AddPricePage() {
   return (
     <div className="max-w-lg mx-auto px-4 py-20 flex flex-col items-center gap-4 text-center">
       <CheckCircle className="h-16 w-16 text-emerald-400" />
-      <h2 className="text-xl font-bold">Price Published!</h2>
+      <h2 className="text-xl font-bold">Цена опубликована!</h2>
       <p className="text-muted-foreground text-sm">
-        Thank you for contributing. Your price is being reviewed.
+        Спасибо за вклад. Ваша цена проходит проверку.
       </p>
       <div className="flex gap-3 mt-4">
-        <Button variant="outline" onClick={() => navigate("/")}>Go Home</Button>
+        <Button variant="outline" onClick={() => navigate("/")}>На главную</Button>
         <Button onClick={() => { resetCam(); setStep("photo"); setSelectedProduct(null); setSelectedStore(null); setPrice(""); setAiResult(null); }}>
-          Add Another
+          Добавить ещё
         </Button>
       </div>
     </div>
