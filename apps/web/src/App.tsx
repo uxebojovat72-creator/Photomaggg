@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -9,6 +9,8 @@ const RegisterPage = lazy(() => import("@/pages/RegisterPage"));
 const SearchPage = lazy(() => import("@/pages/SearchPage"));
 const ProductPage = lazy(() => import("@/pages/ProductPage"));
 const AddPricePage = lazy(() => import("@/pages/AddPricePage"));
+const AnalyticsPage = lazy(() => import("@/pages/AnalyticsPage"));
+const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage"));
 
 function PageLoader() {
@@ -35,8 +37,8 @@ export default function App() {
           <Route path="/search" element={<SearchPage />} />
           <Route path="/add-price" element={<AddPricePage />} />
           <Route path="/products/:id" element={<ProductPage />} />
-          <Route path="/analytics" element={<PageLoader />} />
-          <Route path="/profile" element={<PageLoader />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="/notifications" element={<PageLoader />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
