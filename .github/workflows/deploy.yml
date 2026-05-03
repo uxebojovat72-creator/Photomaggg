@@ -8,21 +8,59 @@ env:
   NODE_VERSION: "20"
 
 jobs:
+  # ─── Deploy API to your server via Docker ───────────────────────────────────
   deploy-api:
-    name: Deploy API to Railway
+    name: Deploy API to Server
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to Railway
-        uses: bervProject/railway-deploy@v1.3.0
-        with:
-          railway_token: ${{ secrets.RAILWAY_TOKEN }}
-          service: priceradar-api
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/uxebojovat72-creator/priceradar-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: GITHUB_TOKEN,GITHUB_ACTOR
+          script: |
+            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+            docker pull ghcr.io/uxebojovat72-creator/priceradar-api:latest
+            docker stop priceradar-api || true
+            docker rm priceradar-api || true
+            docker run -d \
+              --name priceradar-api \
+              --restart unless-stopped \
+              -p 4000:4000 \
+              --env-file /opt/priceradar/.env \
+              ghcr.io/uxebojovat72-creator/priceradar-api:latest
+            docker image prune -f
+            echo "API deployed successfully"
+
+  # ─── Deploy Web to Cloudflare Pages ─────────────────────────────────────────
   deploy-web:
     name: Deploy Web to Cloudflare Pages
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,9 +69,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build shared package
         run: pnpm --filter @priceradar/shared build
@@ -42,7 +81,6 @@ jobs:
         run: pnpm --filter web build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1
