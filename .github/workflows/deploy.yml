@@ -1,8 +1,10 @@
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
     branches: [main]
+    types: [completed]
 
 env:
   NODE_VERSION: "20"
@@ -12,9 +14,16 @@ jobs:
   deploy-api:
     name: Deploy API to Server
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -50,7 +59,7 @@ jobs:
             docker run -d \
               --name priceradar-api \
               --restart unless-stopped \
-              -p 4000:4000 \
+              --network host \
               --env-file /opt/priceradar/.env \
               ghcr.io/uxebojovat72-creator/priceradar-api:latest
             docker image prune -f
@@ -60,9 +69,16 @@ jobs:
   deploy-web:
     name: Deploy Web to Cloudflare Pages
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      contents: read
+      deployments: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: pnpm/action-setup@v4
 
