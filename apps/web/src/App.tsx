@@ -11,6 +11,7 @@ const ProductPage = lazy(() => import("@/pages/ProductPage"));
 const AddPricePage = lazy(() => import("@/pages/AddPricePage"));
 const AnalyticsPage = lazy(() => import("@/pages/AnalyticsPage"));
 const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
+const ModerationPage = lazy(() => import("@/pages/ModerationPage"));
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage"));
 
 function PageLoader() {
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="/products/:id" element={<ProductPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/moderation" element={<ModerationPage />} />
           <Route path="/notifications" element={<PageLoader />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
