@@ -152,7 +152,7 @@ model Product {
   prices    Price[]
   favorites Favorite[]
 
-  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "products_name_gin")
+  @@index([name])
   @@map("products")
 }
 

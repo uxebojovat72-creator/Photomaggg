@@ -27,5 +27,5 @@ RUN pnpm --filter api build
 ENV NODE_ENV=production
 EXPOSE 4000
 
-# On start: push DB schema then run server
-CMD ["sh", "-c", "pnpm --filter api prisma:push && node apps/api/dist/index.js"]
+# On start: run server (schema must be set up separately via prisma:push or Neon console)
+CMD ["node", "apps/api/dist/index.js"]
