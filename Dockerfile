@@ -1,6 +1,9 @@
 FROM node:20-slim
 WORKDIR /app
 
+# Install OpenSSL (required by Prisma schema engine)
+RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
 # Enable pnpm
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 
