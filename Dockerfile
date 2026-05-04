@@ -18,7 +18,7 @@ COPY apps/api ./apps/api
 
 # Build shared types, generate Prisma client, compile API
 RUN pnpm --filter @priceradar/shared build
-RUN pnpm --filter api exec prisma generate
+RUN pnpm --filter api prisma:generate
 RUN pnpm --filter api build
 
 ENV NODE_ENV=production

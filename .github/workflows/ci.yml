@@ -99,6 +99,9 @@ jobs:
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
 
+      - name: Enable pg_trgm extension
+        run: psql "postgresql://priceradar:priceradar_test@localhost:5432/priceradar_test" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+
       - name: Push DB schema
         run: pnpm --filter api prisma:push
         env:
