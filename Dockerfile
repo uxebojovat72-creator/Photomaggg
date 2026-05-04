@@ -1,7 +1,7 @@
-FROM node:20-slim
+FROM node:20-bullseye-slim
 WORKDIR /app
 
-# Install OpenSSL (required by Prisma schema engine)
+# Install OpenSSL 1.1.x (required by Prisma on Debian Bullseye)
 RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Enable pnpm
