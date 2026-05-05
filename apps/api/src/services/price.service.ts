@@ -21,9 +21,79 @@ async function checkSpam(userId: string): Promise<void> {
   }
 }
 
+async function resolveProduct(productId: string | undefined, productName: string | undefined, userId: string): Promise<string> {
+  if (productId) return productId;
+  if (!productName) throw Object.assign(new Error("Product required"), { statusCode: 400 });
+
+  // Try to find existing product by name (case-insensitive)
+  const existing = await prisma.product.findFirst({
+    where: { name: { equals: productName, mode: "insensitive" }, deletedAt: null },
+  });
+  if (existing) return existing.id;
+
+  // Create new product
+  const created = await prisma.product.create({
+    data: { name: productName, createdBy: userId, aiGenerated: false, aiConfirmed: false },
+  });
+  return created.id;
+}
+
+async function resolveStore(
+  storeId: string | undefined,
+  storeName: string | undefined,
+  cityName: string | undefined,
+  countryCode: string | undefined,
+  userId: string,
+): Promise<string> {
+  if (storeId) return storeId;
+  if (!storeName) throw Object.assign(new Error("Store required"), { statusCode: 400 });
+
+  // Try to find existing store by name (case-insensitive)
+  const existing = await prisma.store.findFirst({
+    where: { name: { equals: storeName, mode: "insensitive" } },
+  });
+  if (existing) return existing.id;
+
+  // Resolve city
+  let cityId: string;
+  if (cityName) {
+    const city = await prisma.city.findFirst({
+      where: { name: { contains: cityName, mode: "insensitive" } },
+    });
+    if (city) {
+      cityId = city.id;
+    } else {
+      // Create city — find country first
+      const country = await prisma.country.findFirst({
+        where: countryCode
+          ? { code: countryCode.toUpperCase() }
+          : undefined,
+        orderBy: { name: "asc" },
+      });
+      if (!country) throw Object.assign(new Error("Country not found"), { statusCode: 400 });
+      const newCity = await prisma.city.create({ data: { name: cityName, countryId: country.id } });
+      cityId = newCity.id;
+    }
+  } else {
+    // Fallback to Moscow
+    const moscow = await prisma.city.findFirst({ orderBy: { name: "asc" } });
+    if (!moscow) throw Object.assign(new Error("No cities in database"), { statusCode: 500 });
+    cityId = moscow.id;
+  }
+
+  const store = await prisma.store.create({
+    data: { name: storeName, cityId, createdBy: userId },
+  });
+  return store.id;
+}
+
 export async function createPrice(data: {
-  productId: string;
-  storeId: string;
+  productId?: string;
+  productName?: string;
+  storeId?: string;
+  storeName?: string;
+  cityName?: string;
+  countryCode?: string;
   userId: string;
   userRole: string;
   userTrustScore: number;
@@ -35,11 +105,14 @@ export async function createPrice(data: {
 }) {
   await checkSpam(data.userId);
 
+  const productId = await resolveProduct(data.productId, data.productName, data.userId);
+  const storeId = await resolveStore(data.storeId, data.storeName, data.cityName, data.countryCode, data.userId);
+
   let photoUrl: string | null = null;
   if (data.photoBuffer && data.photoMime) {
     const uploaded = await uploadPhoto(
       data.photoBuffer,
-      `${data.userId}-${data.productId}`,
+      `${data.userId}-${productId}`,
       data.photoMime
     );
     photoUrl = uploaded.url;
@@ -54,8 +127,8 @@ export async function createPrice(data: {
 
   const price = await prisma.price.create({
     data: {
-      productId: data.productId,
-      storeId: data.storeId,
+      productId,
+      storeId,
       userId: data.userId,
       price: data.price,
       currencyCode: data.currencyCode,
