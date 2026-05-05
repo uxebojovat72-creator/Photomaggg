@@ -157,7 +157,7 @@ export default function AddPricePage() {
       <div className="rounded-xl border bg-card overflow-hidden">
         {cam.isActive ? (
           <div className="relative">
-            <video ref={videoRef} className="w-full aspect-[4/3] object-cover bg-black" playsInline muted />
+            <video ref={videoRef} className="w-full aspect-[4/3] object-cover bg-black" playsInline muted autoPlay />
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-3">
               <Button size="lg" className="rounded-full h-14 w-14 p-0 shadow-xl" onClick={handleCapture}>
                 <Camera className="h-6 w-6" />
