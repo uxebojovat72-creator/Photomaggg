@@ -16,6 +16,9 @@ async function recognizeWithCloudflare(imageBase64: string): Promise<AiResult | 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 
+  // LLaVA expects image as byte array, not base64 string
+  const imageBytes = Array.from(Buffer.from(imageBase64, "base64"));
+
   try {
     const res = await fetch(
       `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/llava-hf/llava-1.5-7b-hf`,
@@ -26,25 +29,9 @@ async function recognizeWithCloudflare(imageBase64: string): Promise<AiResult | 
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "image_url",
-                  image_url: { url: `data:image/jpeg;base64,${imageBase64}` },
-                },
-                {
-                  type: "text",
-                  text: `Look at this product or price tag image. Extract the product name and brand.
-Respond ONLY with JSON, no explanation:
-{"name":"product name in original language","brand":"brand or null","category":"food/drink/household/electronics/cosmetics/other or null","confidence":0.0}
-If you cannot identify the product, return: {"name":"","brand":null,"category":null,"confidence":0}`,
-                },
-              ],
-            },
-          ],
-          max_tokens: 150,
+          image: imageBytes,
+          prompt: "USER: <image>\nWhat is the product name and brand shown in this image or price tag? Reply with only: {\"name\":\"...\",\"brand\":\"...\"}. If unknown, reply: {\"name\":\"\",\"brand\":null}\nASSISTANT:",
+          max_tokens: 100,
         }),
         signal: controller.signal,
       }
@@ -56,23 +43,29 @@ If you cannot identify the product, return: {"name":"","brand":null,"category":n
       return null;
     }
 
-    type CfResponse = { result?: { response?: string }; success?: boolean };
+    type CfResponse = { result?: { description?: string; response?: string }; success?: boolean };
     const data = (await res.json()) as CfResponse;
-    const text = data.result?.response?.trim();
+    const text = (data.result?.description ?? data.result?.response ?? "").trim();
     if (!text) return null;
 
-    const clean = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    type ParsedResult = { name?: string; brand?: string | null; category?: string | null; confidence?: number };
-    const parsed = JSON.parse(clean) as ParsedResult;
-    if (typeof parsed.name !== "string") return null;
+    // Try to extract JSON from response
+    const jsonMatch = text.match(/\{[^}]+\}/);
+    if (jsonMatch) {
+      try {
+        type ParsedResult = { name?: string; brand?: string | null };
+        const parsed = JSON.parse(jsonMatch[0]) as ParsedResult;
+        if (parsed.name && typeof parsed.name === "string" && parsed.name.length > 0) {
+          return { name: parsed.name, brand: parsed.brand ?? null, category: null, confidence: 0.75, provider: "cloudflare" };
+        }
+      } catch { /* fallthrough to plain text */ }
+    }
 
-    return {
-      name: parsed.name,
-      brand: parsed.brand ?? null,
-      category: parsed.category ?? null,
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.8,
-      provider: "cloudflare",
-    };
+    // Fallback: use raw text as name if it looks like a product name (short)
+    const clean = text.replace(/[{}"\n]/g, "").trim();
+    if (clean.length > 0 && clean.length < 100) {
+      return { name: clean, brand: null, category: null, confidence: 0.5, provider: "cloudflare" };
+    }
+    return null;
   } catch (err) {
     console.error("[Cloudflare AI] error:", err instanceof Error ? err.message : err);
     return null;
