@@ -56,7 +56,11 @@ If you cannot identify the product, return: {"name":"","brand":null,"category":n
       }
     );
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(`[Gemini] HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      return null;
+    }
 
     type GeminiResponse = {
       candidates?: Array<{
@@ -82,47 +86,56 @@ If you cannot identify the product, return: {"name":"","brand":null,"category":n
       confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.8,
       provider: "gemini",
     };
-  } catch {
+  } catch (err) {
+    console.error("[Gemini] fetch error:", err instanceof Error ? err.message : err);
     return null;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-// ─── Hugging Face ─────────────────────────────────────────────────────────────
+// ─── Hugging Face (VQA — visual question answering) ──────────────────────────
 
 async function recognizeWithHuggingFace(imageBase64: string): Promise<AiResult | null> {
   if (!env.HUGGINGFACE_API_KEY) return null;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  // Use BLIP VQA to ask a specific question about the product
+  const vqaModel = "Salesforce/blip-vqa-large";
 
   try {
     const res = await fetch(
-      `https://api-inference.huggingface.co/models/${env.HUGGINGFACE_MODEL}`,
+      `https://api-inference.huggingface.co/models/${vqaModel}`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${env.HUGGINGFACE_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ inputs: imageBase64, parameters: { max_new_tokens: 100 } }),
+        body: JSON.stringify({
+          inputs: {
+            question: "What is the name of this product or brand shown on the label or price tag?",
+            image: imageBase64,
+          },
+        }),
         signal: controller.signal,
       }
     );
 
     if (!res.ok) return null;
 
-    const data = (await res.json()) as Array<{ generated_text?: string }> | { generated_text?: string };
-    const text = Array.isArray(data) ? data[0]?.generated_text : data.generated_text;
-    if (!text) return null;
+    type VqaResponse = Array<{ answer?: string; score?: number }> | { answer?: string };
+    const data = (await res.json()) as VqaResponse;
+    const answer = Array.isArray(data) ? data[0]?.answer : data.answer;
+    if (!answer || answer.toLowerCase() === "yes" || answer.toLowerCase() === "no") return null;
 
-    const words = text.trim().split(/\s+/);
     return {
-      name: text.trim(),
-      brand: words.length > 1 ? words[0] : null,
+      name: answer.trim(),
+      brand: null,
       category: null,
-      confidence: 0.6,
+      confidence: Array.isArray(data) ? (data[0]?.score ?? 0.5) : 0.5,
       provider: "huggingface",
     };
   } catch {

@@ -102,9 +102,21 @@ export default function AddPricePage() {
     try {
       const result = await pricesApi.recognize(file);
       setAiResult(result);
-      if (result.name) setProductQuery(result.name);
+      if (result.name && result.provider !== "manual") {
+        setProductQuery(result.name);
+      } else {
+        toast({
+          title: "ИИ не распознал товар",
+          description: "Введите название вручную или загрузите более чёткое фото",
+          variant: "destructive",
+        });
+      }
     } catch {
-      // silent — go to manual product selection
+      toast({
+        title: "Ошибка связи с ИИ",
+        description: "Проверьте подключение к интернету или введите товар вручную",
+        variant: "destructive",
+      });
     } finally {
       setAiLoading(false);
       setStep("product");
