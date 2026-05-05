@@ -1,8 +1,8 @@
-FROM node:20-bullseye-slim
+FROM node:20-alpine
 WORKDIR /app
 
-# Install OpenSSL 1.1.x (required by Prisma on Debian Bullseye)
-RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+# OpenSSL required by Prisma (client + schema engine)
+RUN apk add --no-cache openssl
 
 # Enable pnpm
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
@@ -27,5 +27,4 @@ RUN pnpm --filter api build
 ENV NODE_ENV=production
 EXPOSE 4000
 
-# On start: run server (schema must be set up separately via prisma:push or Neon console)
-CMD ["node", "apps/api/dist/index.js"]
+CMD ["sh", "-c", "pnpm --filter api prisma:push && node apps/api/dist/index.js"]
