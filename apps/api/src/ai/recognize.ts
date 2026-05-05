@@ -18,7 +18,7 @@ async function recognizeWithCloudflare(imageBase64: string): Promise<AiResult | 
 
   try {
     const res = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/meta/llama-3.2-11b-vision-instruct`,
+      `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/llava-hf/llava-1.5-7b-hf`,
       {
         method: "POST",
         headers: {
