@@ -23,6 +23,7 @@ export const env = {
   RATE_LIMIT_GUEST: parseInt(process.env.RATE_LIMIT_GUEST ?? "100", 10),
   RATE_LIMIT_AUTH: parseInt(process.env.RATE_LIMIT_AUTH ?? "300", 10),
 
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? "",
   HUGGINGFACE_API_KEY: process.env.HUGGINGFACE_API_KEY ?? "",
   HUGGINGFACE_MODEL: process.env.HUGGINGFACE_MODEL ?? "Salesforce/blip-image-captioning-large",
   GOOGLE_CLOUD_VISION_API_KEY: process.env.GOOGLE_CLOUD_VISION_API_KEY ?? "",
