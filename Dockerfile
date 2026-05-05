@@ -27,4 +27,4 @@ RUN pnpm --filter api build
 ENV NODE_ENV=production
 EXPOSE 4000
 
-CMD ["sh", "-c", "pnpm --filter api prisma:push && node apps/api/dist/index.js"]
+CMD ["node", "apps/api/dist/index.js"]
