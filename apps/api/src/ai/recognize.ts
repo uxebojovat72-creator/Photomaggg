@@ -5,7 +5,80 @@ export interface AiResult {
   brand: string | null;
   category: string | null;
   confidence: number;
-  provider: "gemini" | "huggingface" | "google_vision" | "manual";
+  provider: "cloudflare" | "gemini" | "huggingface" | "google_vision" | "manual";
+}
+
+// ─── Cloudflare Workers AI — Llama 3.2 Vision (free, no card) ───────────────
+
+async function recognizeWithCloudflare(imageBase64: string): Promise<AiResult | null> {
+  if (!env.CLOUDFLARE_AI_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/meta/llama-3.2-11b-vision-instruct`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.CLOUDFLARE_AI_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image_url",
+                  image_url: { url: `data:image/jpeg;base64,${imageBase64}` },
+                },
+                {
+                  type: "text",
+                  text: `Look at this product or price tag image. Extract the product name and brand.
+Respond ONLY with JSON, no explanation:
+{"name":"product name in original language","brand":"brand or null","category":"food/drink/household/electronics/cosmetics/other or null","confidence":0.0}
+If you cannot identify the product, return: {"name":"","brand":null,"category":null,"confidence":0}`,
+                },
+              ],
+            },
+          ],
+          max_tokens: 150,
+        }),
+        signal: controller.signal,
+      }
+    );
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(`[Cloudflare AI] HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      return null;
+    }
+
+    type CfResponse = { result?: { response?: string }; success?: boolean };
+    const data = (await res.json()) as CfResponse;
+    const text = data.result?.response?.trim();
+    if (!text) return null;
+
+    const clean = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    type ParsedResult = { name?: string; brand?: string | null; category?: string | null; confidence?: number };
+    const parsed = JSON.parse(clean) as ParsedResult;
+    if (typeof parsed.name !== "string") return null;
+
+    return {
+      name: parsed.name,
+      brand: parsed.brand ?? null,
+      category: parsed.category ?? null,
+      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.8,
+      provider: "cloudflare",
+    };
+  } catch (err) {
+    console.error("[Cloudflare AI] error:", err instanceof Error ? err.message : err);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // ─── Google Gemini Flash (free tier: 1500 req/day) ────────────────────────────
@@ -197,12 +270,13 @@ async function recognizeWithGoogleVision(imageBase64: string): Promise<AiResult 
   }
 }
 
-// ─── Main recognizer: Gemini → HuggingFace → Google Vision → manual ──────────
+// ─── Main recognizer: Cloudflare → Gemini → HuggingFace → Google Vision → manual
 
 export async function recognizeProduct(imageBuffer: Buffer): Promise<AiResult> {
   const imageBase64 = imageBuffer.toString("base64");
 
   const result =
+    (await recognizeWithCloudflare(imageBase64)) ??
     (await recognizeWithGemini(imageBase64)) ??
     (await recognizeWithHuggingFace(imageBase64)) ??
     (await recognizeWithGoogleVision(imageBase64));

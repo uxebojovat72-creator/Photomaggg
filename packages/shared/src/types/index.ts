@@ -161,7 +161,7 @@ export interface AiRecognitionResult {
   brand: string | null;
   category: string | null;
   confidence: number;
-  provider: "gemini" | "huggingface" | "google_vision" | "manual";
+  provider: "cloudflare" | "gemini" | "huggingface" | "google_vision" | "manual";
 }
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
