@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 export interface CameraState {
   stream: MediaStream | null;
@@ -10,6 +10,7 @@ export interface CameraState {
 
 export function useCamera() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const pendingStreamRef = useRef<MediaStream | null>(null);
   const [state, setState] = useState<CameraState>({
     stream: null,
     error: null,
@@ -18,15 +19,20 @@ export function useCamera() {
     capturedUrl: null,
   });
 
+  // Attach stream to video element after it mounts (isActive causes conditional render)
+  useEffect(() => {
+    if (state.isActive && videoRef.current && pendingStreamRef.current) {
+      videoRef.current.srcObject = pendingStreamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [state.isActive]);
+
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
       });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      pendingStreamRef.current = stream;
       setState((s) => ({ ...s, stream, isActive: true, error: null }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Camera access denied";
@@ -36,6 +42,7 @@ export function useCamera() {
 
   const stopCamera = useCallback(() => {
     state.stream?.getTracks().forEach((t) => t.stop());
+    pendingStreamRef.current = null;
     setState((s) => ({ ...s, stream: null, isActive: false }));
   }, [state.stream]);
 
@@ -48,7 +55,6 @@ export function useCamera() {
     canvas.getContext("2d")?.drawImage(video, 0, 0);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
 
-    // Convert to File
     const arr = dataUrl.split(",");
     const bstr = atob(arr[1]);
     const u8 = new Uint8Array(bstr.length);
