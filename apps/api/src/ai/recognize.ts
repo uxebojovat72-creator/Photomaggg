@@ -22,16 +22,23 @@ export async function recognizeWithTesseract(imageBuffer: Buffer): Promise<AiRes
     const text = await (tesseract as unknown as { recognize: (path: string, config: Record<string, unknown>) => Promise<string> })
       .recognize(tmpPath, { lang: "eng+rus", oem: 1, psm: 3 });
 
-    const lines = text
+    // Score each line: prefer lines with more letters over digits/symbols
+    const scored = text
       .split("\n")
       .map((l: string) => l.trim())
-      .filter((l: string) => l.length >= 3 && /[a-zA-Zа-яА-Я0-9]/.test(l));
+      .filter((l: string) => l.length >= 2 && /[a-zA-Zа-яА-Я]/.test(l))
+      .map((l: string) => {
+        const letters = (l.match(/[a-zA-Zа-яА-Я]/g) ?? []).length;
+        const ratio = letters / l.length;
+        return { line: l, score: l.length * ratio };
+      })
+      .sort((a, b) => b.score - a.score);
 
-    if (lines.length === 0) return null;
+    if (scored.length === 0) return null;
 
-    // Find the most prominent line (longest meaningful word cluster)
-    const best = lines.reduce((a: string, b: string) => (b.length > a.length ? b : a), lines[0]);
-    const name = best.replace(/[|\\/<>{}[\]]/g, "").trim();
+    // Combine top 2 meaningful lines (brand + product name pattern)
+    const top = scored.slice(0, 2).map((s) => s.line.replace(/[|\\/<>{}[\]]/g, "").trim());
+    const name = top.join(" ").replace(/\s{2,}/g, " ").trim();
     if (name.length < 2) return null;
 
     return { name, brand: null, category: null, confidence: 0.65, provider: "tesseract" };
