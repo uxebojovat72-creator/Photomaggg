@@ -83,35 +83,42 @@ export async function recognizeWithTesseract(imageBuffer: Buffer): Promise<AiRes
     recognize: (path: string, config: Record<string, unknown>) => Promise<string>;
   }).recognize;
 
-  // Prepare: upscale to 2400px wide (color, no grayscale — LSTM prefers color)
-  let upscaled: Buffer;
+  // Prepare variants: color (dark text) + inverted grayscale (white text on colored bg)
+  let colorBuf: Buffer;
+  let invertBuf: Buffer;
   try {
     const meta = await sharp(imageBuffer).metadata();
     const w = meta.width ?? 0;
-    if (w > 0 && w < 2400) {
-      const scale = Math.min(4, Math.ceil(2400 / w));
-      upscaled = await sharp(imageBuffer)
-        .resize(Math.round(w * scale), undefined, { kernel: sharp.kernel.lanczos3 })
-        .toBuffer();
-    } else {
-      upscaled = imageBuffer;
-    }
+    const needsUpscale = w > 0 && w < 1800;
+    const scale = needsUpscale ? Math.min(3, Math.ceil(1800 / w)) : 1;
+
+    const base = needsUpscale
+      ? sharp(imageBuffer).resize(Math.round(w * scale), undefined, { kernel: sharp.kernel.lanczos3 })
+      : sharp(imageBuffer);
+
+    [colorBuf, invertBuf] = await Promise.all([
+      base.clone().toBuffer(),                              // original color — dark text on light bg
+      base.clone().grayscale().normalise().negate().toBuffer(), // inverted — white text on dark/colored bg
+    ]);
   } catch {
-    upscaled = imageBuffer;
+    colorBuf = imageBuffer;
+    invertBuf = imageBuffer;
   }
 
-  const tmpPath = join(tmpdir(), `ocr_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const tmpColor = join(tmpdir(), `ocr_${id}_c.jpg`);
+  const tmpInvert = join(tmpdir(), `ocr_${id}_i.png`);
   try {
-    await writeFile(tmpPath, upscaled);
+    await Promise.all([writeFile(tmpColor, colorBuf), writeFile(tmpInvert, invertBuf)]);
 
-    // PSM 11 = sparse text — best for product labels with scattered text
-    // PSM 3  = auto — good general fallback
-    const [r11, r3] = await Promise.allSettled([
-      recognize(tmpPath, { lang: "eng+rus", oem: 1, psm: 11 }),
-      recognize(tmpPath, { lang: "eng+rus", oem: 1, psm: 3 }),
+    // PSM 11 (sparse text, best for labels) on both variants
+    const [rc11, ri11, rc3] = await Promise.allSettled([
+      recognize(tmpColor,  { lang: "eng+rus", oem: 1, psm: 11 }), // color, sparse
+      recognize(tmpInvert, { lang: "eng+rus", oem: 1, psm: 11 }), // inverted, sparse — catches white text
+      recognize(tmpColor,  { lang: "eng+rus", oem: 1, psm: 3 }),  // color, auto
     ]);
 
-    const texts = [r11, r3]
+    const texts = [rc11, ri11, rc3]
       .filter((r): r is PromiseFulfilledResult<string> => r.status === "fulfilled")
       .map((r) => r.value);
 
@@ -136,7 +143,7 @@ export async function recognizeWithTesseract(imageBuffer: Buffer): Promise<AiRes
     console.error("[Tesseract] error:", err instanceof Error ? err.message : err);
     return null;
   } finally {
-    await unlink(tmpPath).catch(() => {});
+    await Promise.allSettled([unlink(tmpColor), unlink(tmpInvert)]);
   }
 }
 
