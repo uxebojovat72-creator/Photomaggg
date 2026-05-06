@@ -1,6 +1,9 @@
 FROM node:20-alpine
 WORKDIR /app
 
+# OpenSSL required by Prisma + Tesseract OCR for product recognition
+RUN apk add --no-cache openssl tesseract-ocr tesseract-ocr-data-eng tesseract-ocr-data-rus
+
 # Enable pnpm
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 
@@ -24,5 +27,4 @@ RUN pnpm --filter api build
 ENV NODE_ENV=production
 EXPOSE 4000
 
-# On start: push DB schema then run server
-CMD ["sh", "-c", "pnpm --filter api prisma:push && node apps/api/dist/index.js"]
+CMD ["node", "apps/api/dist/index.js"]

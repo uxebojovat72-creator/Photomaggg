@@ -74,6 +74,9 @@ importers:
       jsonwebtoken:
         specifier: ^9.0.2
         version: 9.0.3
+      node-tesseract-ocr:
+        specifier: ^2.2.1
+        version: 2.2.1
       pino-pretty:
         specifier: ^11.0.0
         version: 11.3.0
@@ -107,7 +110,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^1.6.0
-        version: 1.6.1(@types/node@20.19.39)
+        version: 1.6.1(@types/node@20.19.39)(terser@5.46.2)
 
   apps/web:
     dependencies:
@@ -3462,6 +3465,10 @@ packages:
 
   node-releases@2.0.38:
     resolution: {integrity: sha512-3qT/88Y3FbH/Kx4szpQQ4HzUbVrHPKTLVpVocKiLfoYvw9XSGOX2FmD2d6DrXbVYyAQTF2HeF6My8jmzx7/CRw==}
+
+  node-tesseract-ocr@2.2.1:
+    resolution: {integrity: sha512-Q9cD79JGpPNQBxbi1fV+OAsTxYKLpx22sagsxSyKbu1u+t6UarApf5m32uVc8a5QAP1Wk7fIPN0aJFGGEE9DyQ==}
+    engines: {node: '>=10'}
 
   nopt@5.0.0:
     resolution: {integrity: sha512-Tbj67rffqceeLpcRXrT7vKAN8CwfPeIBgM7E6iBkmKLV7bEMwpGgYLGv0jACUsECaa/vuxP0IjEont6umdMgtQ==}
@@ -8001,6 +8008,8 @@ snapshots:
 
   node-releases@2.0.38: {}
 
+  node-tesseract-ocr@2.2.1: {}
+
   nopt@5.0.0:
     dependencies:
       abbrev: 1.1.1
@@ -8986,7 +8995,7 @@ snapshots:
       d3-time: 3.1.0
       d3-timer: 3.0.1
 
-  vite-node@1.6.1(@types/node@20.19.39):
+  vite-node@1.6.1(@types/node@20.19.39)(terser@5.46.2):
     dependencies:
       cac: 6.7.14
       debug: 4.4.3
@@ -9025,7 +9034,7 @@ snapshots:
       fsevents: 2.3.3
       terser: 5.46.2
 
-  vitest@1.6.1(@types/node@20.19.39):
+  vitest@1.6.1(@types/node@20.19.39)(terser@5.46.2):
     dependencies:
       '@vitest/expect': 1.6.1
       '@vitest/runner': 1.6.1
@@ -9045,7 +9054,7 @@ snapshots:
       tinybench: 2.9.0
       tinypool: 0.8.4
       vite: 5.4.21(@types/node@20.19.39)(terser@5.46.2)
-      vite-node: 1.6.1(@types/node@20.19.39)
+      vite-node: 1.6.1(@types/node@20.19.39)(terser@5.46.2)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 20.19.39
