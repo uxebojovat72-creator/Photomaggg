@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma.js";
 import { signAccessToken, createRefreshToken } from "./token.service.js";
 import type { RegisterRequest, LoginRequest, AuthResponse } from "@priceradar/shared";

@@ -33,7 +33,8 @@
     "@fastify/swagger-ui": "^4.0.0",
     "@priceradar/shared": "workspace:*",
     "@prisma/client": "^5.14.0",
-    "bcrypt": "^5.1.1",
+    "@types/bcryptjs": "^3.0.0",
+    "bcryptjs": "^3.0.3",
     "bullmq": "^5.8.0",
     "fastify": "^4.27.0",
     "fastify-plugin": "^4.5.1",
@@ -46,7 +47,6 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/bcrypt": "^5.0.2",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.14.0",
     "@types/uuid": "^10.0.0",
