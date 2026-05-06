@@ -23,6 +23,9 @@ export const env = {
   RATE_LIMIT_GUEST: parseInt(process.env.RATE_LIMIT_GUEST ?? "100", 10),
   RATE_LIMIT_AUTH: parseInt(process.env.RATE_LIMIT_AUTH ?? "300", 10),
 
+  OLLAMA_URL: process.env.OLLAMA_URL ?? "http://ollama:11434",
+  OLLAMA_MODEL: process.env.OLLAMA_MODEL ?? "moondream",
+
   CLOUDFLARE_AI_TOKEN: process.env.CLOUDFLARE_AI_TOKEN ?? "",
   CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID ?? "",
   GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? "",

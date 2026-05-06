@@ -10,32 +10,95 @@ export interface AiResult {
   brand: string | null;
   category: string | null;
   confidence: number;
-  provider: "tesseract" | "cloudflare" | "gemini" | "huggingface" | "google_vision" | "manual";
+  provider: "ollama" | "tesseract" | "cloudflare" | "gemini" | "huggingface" | "google_vision" | "manual";
 }
 
-// ─── Image preprocessing — upscale + sharpen + grayscale ────────────────────
+// ─── Ollama (local, unlimited, free) ─────────────────────────────────────────
+
+async function recognizeWithOllama(imageBase64: string): Promise<AiResult | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const res = await fetch(`${env.OLLAMA_URL}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: env.OLLAMA_MODEL,
+        prompt:
+          "Look at this product image. Extract the exact product name, brand, and size/volume if visible. " +
+          'Reply ONLY with valid JSON: {"name":"full product name with size","brand":"brand or null","category":"food/drink/household/electronics/other or null","confidence":0.0}',
+        images: [imageBase64],
+        stream: false,
+        options: { temperature: 0.1 },
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      console.error(`[Ollama] HTTP ${res.status}`);
+      return null;
+    }
+
+    type OllamaResponse = { response?: string };
+    const data = (await res.json()) as OllamaResponse;
+    const text = data.response?.trim();
+    if (!text) return null;
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      // Model returned plain text instead of JSON — use it directly
+      const clean = text.split("\n")[0].trim();
+      if (clean.length > 1 && clean.length < 150) {
+        console.log("[Ollama] plain text:", clean);
+        return { name: clean, brand: null, category: null, confidence: 0.75, provider: "ollama" };
+      }
+      return null;
+    }
+
+    type ParsedResult = { name?: string; brand?: string | null; category?: string | null; confidence?: number };
+    const parsed = JSON.parse(jsonMatch[0]) as ParsedResult;
+    if (typeof parsed.name !== "string" || !parsed.name) return null;
+
+    console.log("[Ollama] recognized:", parsed.name);
+    return {
+      name: parsed.name,
+      brand: parsed.brand ?? null,
+      category: parsed.category ?? null,
+      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.8,
+      provider: "ollama",
+    };
+  } catch (err) {
+    if ((err as Error).name !== "AbortError") {
+      console.error("[Ollama] error:", err instanceof Error ? err.message : err);
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ─── Image preprocessing ─────────────────────────────────────────────────────
 
 async function preprocessImage(imageBuffer: Buffer): Promise<Buffer> {
   const meta = await sharp(imageBuffer).metadata();
   const w = meta.width ?? 0;
-  // Upscale to at least 1600px wide for better OCR accuracy
   const scale = w > 0 && w < 1600 ? Math.min(4, Math.ceil(1600 / w)) : 1;
 
   return sharp(imageBuffer)
     .resize(w > 0 ? w * scale : undefined, undefined, { kernel: sharp.kernel.lanczos3 })
     .grayscale()
-    .normalise()          // auto contrast stretch
+    .normalise()
     .sharpen({ sigma: 1.5 })
     .toBuffer();
 }
 
-// ─── Extract best product name from OCR text ────────────────────────────────
+// ─── Garbage detection ───────────────────────────────────────────────────────
 
 function isGarbage(text: string): boolean {
   const letters = (text.match(/[a-zA-Zа-яА-ЯёЁ]/g) ?? []).length;
   const total = text.replace(/\s/g, "").length;
   if (total === 0) return true;
-  // Garbage if less than 50% real letters, or too many isolated single chars
   const letterRatio = letters / total;
   const words = text.trim().split(/\s+/);
   const singleCharWords = words.filter((w) => w.length === 1).length;
@@ -51,13 +114,11 @@ function extractName(text: string): string | null {
 
   if (lines.length === 0) return null;
 
-  // Score: prefer lines with high letter ratio and longer length
   const scored = lines.map((l) => {
     const letters = (l.match(/[a-zA-Zа-яА-ЯёЁ]/g) ?? []).length;
     return { line: l, score: l.length * (letters / l.length) };
   }).sort((a, b) => b.score - a.score);
 
-  // Take top 2 distinct lines and join
   const top: string[] = [];
   for (const { line } of scored) {
     if (top.length >= 2) break;
@@ -70,7 +131,7 @@ function extractName(text: string): string | null {
   return name.length >= 2 ? name : null;
 }
 
-// ─── Tesseract OCR (local, free, reads Russian + English) ────────────────────
+// ─── Tesseract OCR (offline fallback) ────────────────────────────────────────
 
 export async function recognizeWithTesseract(imageBuffer: Buffer): Promise<AiResult | null> {
   let processed: Buffer;
@@ -84,24 +145,23 @@ export async function recognizeWithTesseract(imageBuffer: Buffer): Promise<AiRes
   try {
     await writeFile(tmpPath, processed);
 
-    // Try multiple PSM modes: 6 (block), 11 (sparse) — sparse is better for product labels
-    const recognize = (tesseract as unknown as { recognize: (path: string, config: Record<string, unknown>) => Promise<string> }).recognize;
+    const recognize = (tesseract as unknown as {
+      recognize: (path: string, config: Record<string, unknown>) => Promise<string>;
+    }).recognize;
 
     const results = await Promise.allSettled([
-      recognize(tmpPath, { lang: "eng+rus", oem: 1, psm: 11 }), // sparse text — best for labels
-      recognize(tmpPath, { lang: "eng+rus", oem: 1, psm: 6 }),  // single text block
+      recognize(tmpPath, { lang: "eng+rus", oem: 1, psm: 11 }),
+      recognize(tmpPath, { lang: "eng+rus", oem: 1, psm: 6 }),
     ]);
 
-    const texts = results
+    const best = results
       .filter((r): r is PromiseFulfilledResult<string> => r.status === "fulfilled")
-      .map((r) => r.value);
-
-    // Pick the result with the most alphabetic characters
-    const best = texts.reduce<string | null>((acc, t) => {
-      const letters = (t.match(/[a-zA-Zа-яА-ЯёЁ]/g) ?? []).length;
-      const accLetters = (acc?.match(/[a-zA-Zа-яА-ЯёЁ]/g) ?? []).length;
-      return letters > accLetters ? t : acc;
-    }, null);
+      .map((r) => r.value)
+      .reduce<string | null>((acc, t) => {
+        const letters = (t.match(/[a-zA-Zа-яА-ЯёЁ]/g) ?? []).length;
+        const accLetters = (acc?.match(/[a-zA-Zа-яА-ЯёЁ]/g) ?? []).length;
+        return letters > accLetters ? t : acc;
+      }, null);
 
     if (!best) return null;
 
@@ -109,7 +169,7 @@ export async function recognizeWithTesseract(imageBuffer: Buffer): Promise<AiRes
     if (!name) return null;
 
     console.log("[Tesseract] recognized:", name);
-    return { name, brand: null, category: null, confidence: 0.7, provider: "tesseract" };
+    return { name, brand: null, category: null, confidence: 0.65, provider: "tesseract" };
   } catch (err) {
     console.error("[Tesseract] error:", err instanceof Error ? err.message : err);
     return null;
@@ -118,7 +178,7 @@ export async function recognizeWithTesseract(imageBuffer: Buffer): Promise<AiRes
   }
 }
 
-// ─── Google Gemini Flash ──────────────────────────────────────────────────────
+// ─── Gemini (optional, if key available and not over quota) ──────────────────
 
 async function recognizeWithGemini(imageBase64: string): Promise<AiResult | null> {
   if (!env.GEMINI_API_KEY) return null;
@@ -134,7 +194,7 @@ async function recognizeWithGemini(imageBase64: string): Promise<AiResult | null
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [
-            { text: `This is a product photo (price tag or package). Extract the exact product name and brand. Reply ONLY with valid JSON: {"name":"full product name with size/volume if visible","brand":"brand name or null","category":"food/drink/household/electronics/other or null","confidence":0.0}` },
+            { text: `This is a product photo. Extract the exact product name, brand, and size. Reply ONLY with valid JSON: {"name":"full product name with size","brand":"brand or null","category":"food/drink/household/electronics/other or null","confidence":0.0}` },
             { inline_data: { mime_type: "image/jpeg", data: imageBase64 } },
           ]}],
           generationConfig: { temperature: 0.1, maxOutputTokens: 200 },
@@ -143,10 +203,7 @@ async function recognizeWithGemini(imageBase64: string): Promise<AiResult | null
       }
     );
 
-    if (!res.ok) {
-      console.error(`[Gemini] HTTP ${res.status}`);
-      return null;
-    }
+    if (!res.ok) return null;
 
     type GeminiResponse = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     const data = (await res.json()) as GeminiResponse;
@@ -163,7 +220,7 @@ async function recognizeWithGemini(imageBase64: string): Promise<AiResult | null
       name: parsed.name,
       brand: parsed.brand ?? null,
       category: parsed.category ?? null,
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.85,
+      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.9,
       provider: "gemini",
     };
   } catch {
@@ -173,63 +230,15 @@ async function recognizeWithGemini(imageBase64: string): Promise<AiResult | null
   }
 }
 
-// ─── Cloudflare Workers AI ────────────────────────────────────────────────────
-
-async function recognizeWithCloudflare(imageBase64: string): Promise<AiResult | null> {
-  if (!env.CLOUDFLARE_AI_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) return null;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-
-  try {
-    const imageBytes = Array.from(Buffer.from(imageBase64, "base64").subarray(0, 500_000));
-
-    const res = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/unum/uform-gen2-qwen-500m`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.CLOUDFLARE_AI_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          image: imageBytes,
-          prompt: "What is the product name and brand shown in this image? Reply with only the product name.",
-        }),
-        signal: controller.signal,
-      }
-    );
-
-    if (!res.ok) return null;
-
-    type CfResponse = { result?: { description?: string; response?: string } };
-    const data = (await res.json()) as CfResponse;
-    const text = (data.result?.description ?? data.result?.response ?? "").trim();
-    if (!text || text.length < 2) return null;
-
-    const clean = text.replace(/^(ASSISTANT:|assistant:)\s*/i, "").split("\n")[0].trim();
-    if (clean.length > 1 && clean.length < 120) {
-      console.log("[Cloudflare] recognized:", clean);
-      return { name: clean, brand: null, category: null, confidence: 0.7, provider: "cloudflare" };
-    }
-    return null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-// ─── Main: Gemini → Tesseract → Cloudflare → manual ─────────────────────────
-// Gemini first (best quality), Tesseract as offline fallback
+// ─── Main: Ollama → Gemini → Tesseract → manual ──────────────────────────────
 
 export async function recognizeProduct(imageBuffer: Buffer): Promise<AiResult> {
   const imageBase64 = imageBuffer.toString("base64");
 
   const result =
+    (await recognizeWithOllama(imageBase64)) ??
     (await recognizeWithGemini(imageBase64)) ??
-    (await recognizeWithTesseract(imageBuffer)) ??
-    (await recognizeWithCloudflare(imageBase64));
+    (await recognizeWithTesseract(imageBuffer));
 
   return result ?? { name: "", brand: null, category: null, confidence: 0, provider: "manual" };
 }
