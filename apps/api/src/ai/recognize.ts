@@ -14,26 +14,24 @@ async function recognizeWithCloudflare(imageBase64: string): Promise<AiResult | 
   if (!env.CLOUDFLARE_AI_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) return null;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeout = setTimeout(() => controller.abort(), 45000);
 
   try {
-    const imageBuffer = Buffer.from(imageBase64, "base64");
-    const blob = new Blob([imageBuffer], { type: "image/jpeg" });
-
-    const form = new FormData();
-    form.append("image", blob, "image.jpg");
-    form.append(
-      "prompt",
-      "USER: <image>\nWhat is the product name and brand shown in this image or price tag? Reply with ONLY the product name, nothing else. Example: Молоко Простоквашино 3.2%\nASSISTANT:"
-    );
-    form.append("max_tokens", "80");
+    // Use byte array — uform-gen2 documented format
+    const imageBytes = Array.from(Buffer.from(imageBase64, "base64").subarray(0, 500_000));
 
     const res = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/llava-hf/llava-1.5-7b-hf`,
+      `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/unum/uform-gen2-qwen-500m`,
       {
         method: "POST",
-        headers: { Authorization: `Bearer ${env.CLOUDFLARE_AI_TOKEN}` },
-        body: form,
+        headers: {
+          Authorization: `Bearer ${env.CLOUDFLARE_AI_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          image: imageBytes,
+          prompt: "What product or brand name is shown in this image? Reply with only the product name.",
+        }),
         signal: controller.signal,
       }
     );
