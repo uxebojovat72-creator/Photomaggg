@@ -31,11 +31,23 @@ async function preprocessImage(imageBuffer: Buffer): Promise<Buffer> {
 
 // ─── Extract best product name from OCR text ────────────────────────────────
 
+function isGarbage(text: string): boolean {
+  const letters = (text.match(/[a-zA-Zа-яА-ЯёЁ]/g) ?? []).length;
+  const total = text.replace(/\s/g, "").length;
+  if (total === 0) return true;
+  // Garbage if less than 50% real letters, or too many isolated single chars
+  const letterRatio = letters / total;
+  const words = text.trim().split(/\s+/);
+  const singleCharWords = words.filter((w) => w.length === 1).length;
+  const singleRatio = singleCharWords / words.length;
+  return letterRatio < 0.5 || singleRatio > 0.4;
+}
+
 function extractName(text: string): string | null {
   const lines = text
     .split("\n")
     .map((l) => l.trim())
-    .filter((l) => l.length >= 2 && /[a-zA-Zа-яА-ЯёЁ]/.test(l));
+    .filter((l) => l.length >= 3 && /[a-zA-Zа-яА-ЯёЁ]/.test(l) && !isGarbage(l));
 
   if (lines.length === 0) return null;
 
@@ -49,9 +61,8 @@ function extractName(text: string): string | null {
   const top: string[] = [];
   for (const { line } of scored) {
     if (top.length >= 2) break;
-    // Skip if substring of already included line
     if (!top.some((t) => t.toLowerCase().includes(line.toLowerCase()) || line.toLowerCase().includes(t.toLowerCase()))) {
-      top.push(line.replace(/[|\\/<>{}[\]@#$%^*]/g, "").trim());
+      top.push(line.replace(/[|\\/<>{}[\]@#$%^*=~]/g, "").trim());
     }
   }
 
