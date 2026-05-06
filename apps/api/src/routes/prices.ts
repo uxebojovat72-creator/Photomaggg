@@ -14,12 +14,25 @@ import {
 import { authenticate, optionalAuth, requireModerator } from "../middleware/auth.js";
 
 const createPriceSchema = z.object({
-  productId: z.string().uuid(),
-  storeId: z.string().uuid(),
+  // Product: either existing UUID or new name
+  productId: z.string().uuid().optional(),
+  productName: z.string().min(2).max(200).optional(),
+  // Store: either existing UUID or new store details
+  storeId: z.string().uuid().optional(),
+  storeName: z.string().min(2).max(100).optional(),
+  cityName: z.string().min(1).max(100).optional(),
+  countryCode: z.string().length(2).toUpperCase().optional(),
+  // Required
   price: z.coerce.number().positive().max(1_000_000),
   currencyCode: z.string().length(3).toUpperCase(),
   aiRecognizedName: z.string().optional(),
-});
+}).refine(
+  (d) => d.productId || d.productName,
+  { message: "Either productId or productName is required" }
+).refine(
+  (d) => d.storeId || d.storeName,
+  { message: "Either storeId or storeName is required" }
+);
 
 const ACCEPTED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -71,10 +84,18 @@ export default async function priceRoutes(fastify: FastifyInstance) {
     }
 
     const price = await createPrice({
-      ...parsed.data,
+      productId: parsed.data.productId,
+      productName: parsed.data.productName,
+      storeId: parsed.data.storeId,
+      storeName: parsed.data.storeName,
+      cityName: parsed.data.cityName,
+      countryCode: parsed.data.countryCode,
+      price: parsed.data.price,
+      currencyCode: parsed.data.currencyCode,
+      aiRecognizedName: parsed.data.aiRecognizedName,
       userId: req.user.sub,
       userRole: req.user.role,
-      userTrustScore: 0, // loaded inside service
+      userTrustScore: 0,
       photoBuffer,
       photoMime,
     });

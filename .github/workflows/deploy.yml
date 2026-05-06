@@ -12,6 +12,9 @@ jobs:
   deploy-api:
     name: Deploy API to Server
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - uses: actions/checkout@v4
@@ -49,44 +52,10 @@ jobs:
             docker rm priceradar-api || true
             docker run -d \
               --name priceradar-api \
+              --network priceradar-net \
               --restart unless-stopped \
               -p 4000:4000 \
               --env-file /opt/priceradar/.env \
               ghcr.io/uxebojovat72-creator/priceradar-api:latest
             docker image prune -f
             echo "API deployed successfully"
-
-  # ─── Deploy Web to Cloudflare Pages ─────────────────────────────────────────
-  deploy-web:
-    name: Deploy Web to Cloudflare Pages
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build shared package
-        run: pnpm --filter @priceradar/shared build
-
-      - name: Build web app
-        run: pnpm --filter web build
-        env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL }}
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: photomaggg
-          directory: apps/web/dist
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}

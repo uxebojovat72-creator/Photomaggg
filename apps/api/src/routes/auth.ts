@@ -29,8 +29,15 @@ export default async function authRoutes(fastify: FastifyInstance) {
     if (!body.success) {
       return reply.code(400).send({ statusCode: 400, error: "Bad Request", message: body.error.issues[0].message });
     }
-    const result = await register(body.data);
-    return reply.code(201).send(result);
+    try {
+      const result = await register(body.data);
+      return reply.code(201).send(result);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      const code = e.statusCode ?? 500;
+      const msg = e.message ?? "Registration failed";
+      return reply.code(code).send({ statusCode: code, error: code === 409 ? "Conflict" : "Internal Server Error", message: msg });
+    }
   });
 
   // POST /auth/login
