@@ -64,11 +64,12 @@ export default async function productRoutes(fastify: FastifyInstance) {
       const local = await prisma.product.findFirst({ where: { barcode: code } });
       if (local) return reply.send({ source: "local", product: local });
 
-      // 2. Query Open Food Facts (free, no key needed)
+      // 2. Query Open Food Facts (free, no key needed) — prefer Russian data
       try {
+        const fields = "product_name_ru,product_name,brands,quantity,image_front_url,image_url,ingredients_text_ru,ingredients_text,categories_tags";
         const res = await fetch(
-          `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,product_name_ru,brands,categories_tags,image_url`,
-          { headers: { "User-Agent": "PriceRadar/1.0" }, signal: AbortSignal.timeout(8000) }
+          `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${fields}&lc=ru`,
+          { headers: { "User-Agent": "PriceRadar/1.0 (github.com/priceradar)" }, signal: AbortSignal.timeout(9000) }
         );
         if (res.ok) {
           type OFFResponse = {
@@ -77,8 +78,12 @@ export default async function productRoutes(fastify: FastifyInstance) {
               product_name_ru?: string;
               product_name?: string;
               brands?: string;
-              categories_tags?: string[];
+              quantity?: string;
+              image_front_url?: string;
               image_url?: string;
+              ingredients_text_ru?: string;
+              ingredients_text?: string;
+              categories_tags?: string[];
             };
           };
           const data = (await res.json()) as OFFResponse;
@@ -86,13 +91,19 @@ export default async function productRoutes(fastify: FastifyInstance) {
             const p = data.product;
             const name = p.product_name_ru || p.product_name || "";
             if (name) {
+              const rawIngredients = p.ingredients_text_ru || p.ingredients_text || "";
+              const description = rawIngredients.length > 0
+                ? rawIngredients.replace(/_/g, "").substring(0, 300)
+                : null;
               return reply.send({
                 source: "openfoodfacts",
                 product: {
                   name: name.trim(),
                   brand: p.brands?.split(",")[0].trim() ?? null,
                   barcode: code,
-                  imageUrl: p.image_url ?? null,
+                  imageUrl: p.image_front_url ?? p.image_url ?? null,
+                  quantity: p.quantity ?? null,
+                  description,
                   categoryHint: p.categories_tags?.[0]?.replace(/^en:|^ru:/, "") ?? null,
                 },
               });
