@@ -23,16 +23,16 @@ export function useBarcode(videoRef: React.RefObject<HTMLVideoElement | null>) {
 
     try {
       const reader = new BrowserMultiFormatReader();
-      const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-      if (!devices.length) {
-        setState({ scanning: false, result: null, error: "Камера не найдена" });
-        return;
-      }
-      // Prefer back camera
-      const device = devices.find((d) => /back|rear|environment/i.test(d.label)) ?? devices[devices.length - 1];
 
-      const controls = await reader.decodeFromVideoDevice(
-        device.deviceId,
+      // Use facingMode — most reliable way to get back camera on mobile
+      const controls = await reader.decodeFromConstraints(
+        {
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        },
         videoRef.current ?? undefined,
         (result, err) => {
           if (result) {
@@ -40,17 +40,25 @@ export function useBarcode(videoRef: React.RefObject<HTMLVideoElement | null>) {
             controlsRef.current = null;
             setState({ scanning: false, result: result.getText(), error: null });
           } else if (err) {
-            // NotFoundException is thrown continuously while scanning — ignore it
-            if (!err.message?.includes("No MultiFormat")) {
-              console.warn("[Barcode]", err.message);
+            // NotFoundException fires every frame — ignore it
+            const msg = err.message ?? "";
+            if (!msg.includes("No MultiFormat") && !msg.includes("NotFoundException")) {
+              console.warn("[Barcode]", msg);
             }
           }
         }
       );
       controlsRef.current = controls;
     } catch (err) {
-      console.error("[Barcode] start error:", err);
-      setState({ scanning: false, result: null, error: "Ошибка доступа к камере" });
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[Barcode] start error:", msg);
+      const friendly =
+        msg.includes("Permission") || msg.includes("NotAllowed")
+          ? "Разрешите доступ к камере"
+          : msg.includes("NotFound") || msg.includes("DevicesNotFound")
+            ? "Камера не найдена"
+            : "Ошибка камеры";
+      setState({ scanning: false, result: null, error: friendly });
     }
   }, [videoRef]);
 
