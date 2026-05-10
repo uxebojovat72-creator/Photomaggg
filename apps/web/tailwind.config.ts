@@ -44,10 +44,12 @@ const config: Config = {
       keyframes: {
         "fade-in": { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
         "slide-up": { "0%": { transform: "translateY(10px)", opacity: "0" }, "100%": { transform: "translateY(0)", opacity: "1" } },
+        "scan-line": { "0%": { top: "10%" }, "50%": { top: "90%" }, "100%": { top: "10%" } },
       },
       animation: {
         "fade-in": "fade-in 0.2s ease-out",
         "slide-up": "slide-up 0.3s ease-out",
+        "scan-line": "scan-line 2s ease-in-out infinite",
       },
     },
   },
