@@ -10,6 +10,7 @@ import {
   getPriceHistory,
 } from "../services/product.service.js";
 import { authenticate, optionalAuth } from "../middleware/auth.js";
+import { prisma } from "../lib/prisma.js";
 
 const createProductSchema = z.object({
   name: z.string().min(2).max(200),
@@ -50,7 +51,62 @@ export default async function productRoutes(fastify: FastifyInstance) {
     return reply.send(categories);
   });
 
-  // GET /products/:id
+  // GET /products/barcode/:code — lookup in DB first, then Open Food Facts
+  fastify.get<{ Params: { code: string } }>(
+    "/barcode/:code",
+    async (req, reply) => {
+      const { code } = req.params;
+      if (!/^\d{8,14}$/.test(code)) {
+        return reply.code(400).send({ statusCode: 400, error: "Bad Request", message: "Invalid barcode" });
+      }
+
+      // 1. Check local DB first
+      const local = await prisma.product.findFirst({ where: { barcode: code } });
+      if (local) return reply.send({ source: "local", product: local });
+
+      // 2. Query Open Food Facts (free, no key needed)
+      try {
+        const res = await fetch(
+          `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,product_name_ru,brands,categories_tags,image_url`,
+          { headers: { "User-Agent": "PriceRadar/1.0" }, signal: AbortSignal.timeout(8000) }
+        );
+        if (res.ok) {
+          type OFFResponse = {
+            status: number;
+            product?: {
+              product_name_ru?: string;
+              product_name?: string;
+              brands?: string;
+              categories_tags?: string[];
+              image_url?: string;
+            };
+          };
+          const data = (await res.json()) as OFFResponse;
+          if (data.status === 1 && data.product) {
+            const p = data.product;
+            const name = p.product_name_ru || p.product_name || "";
+            if (name) {
+              return reply.send({
+                source: "openfoodfacts",
+                product: {
+                  name: name.trim(),
+                  brand: p.brands?.split(",")[0].trim() ?? null,
+                  barcode: code,
+                  imageUrl: p.image_url ?? null,
+                  categoryHint: p.categories_tags?.[0]?.replace(/^en:|^ru:/, "") ?? null,
+                },
+              });
+            }
+          }
+        }
+      } catch {
+        // OFF unavailable — return not found
+      }
+
+      return reply.code(404).send({ statusCode: 404, error: "Not Found", message: "Product not found" });
+    }
+  );
+
   fastify.get<{ Params: { id: string } }>(
     "/:id",
     { preHandler: optionalAuth },

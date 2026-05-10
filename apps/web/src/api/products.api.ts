@@ -23,4 +23,10 @@ export const productsApi = {
 
   getCategories: () =>
     api.get("/products/categories").then((r) => r.data),
+
+  lookupBarcode: (code: string) =>
+    api.get<{
+      source: "local" | "openfoodfacts";
+      product: { name: string; brand: string | null; barcode: string; imageUrl: string | null; categoryHint?: string | null; id?: string };
+    }>(`/products/barcode/${code}`).then((r) => r.data),
 };
