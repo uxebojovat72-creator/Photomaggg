@@ -36,6 +36,7 @@ export default function AddPricePage() {
   const [captureMode, setCaptureMode] = useState<CaptureMode>("barcode");
   const [aiResult, setAiResult] = useState<AiRecognitionResult | null>(null);
   const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [barcodeApiError, setBarcodeApiError] = useState<string | null>(null);
 
   // Product
   const [productQuery, setProductQuery] = useState(prefill?.productName ?? "");
@@ -82,11 +83,11 @@ export default function AddPricePage() {
   useEffect(() => {
     if (!barcode.result) return;
     setBarcodeLoading(true);
+    setBarcodeApiError(null);
     productsApi.lookupBarcode(barcode.result)
       .then((data) => {
         const p = data.product;
         if (data.source === "local" && p.id) {
-          // Known product — skip to store
           setSelectedProduct({
             id: p.id,
             name: p.name,
@@ -103,7 +104,6 @@ export default function AddPricePage() {
           setStep("store");
           toast({ title: "Товар найден!", description: p.name });
         } else {
-          // Found in Open Food Facts — pre-fill product search
           setProductQuery(p.name);
           if (p.brand) {
             setAiResult({ name: p.name, brand: p.brand, category: null, confidence: 0.95, provider: "manual" });
@@ -112,13 +112,16 @@ export default function AddPricePage() {
           toast({ title: "Штрихкод распознан", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""}` });
         }
       })
-      .catch(() => {
-        // Barcode not found anywhere — just go to product search
-        setStep("product");
-        toast({ title: "Товар не найден по штрихкоду", description: "Введите название вручную", variant: "destructive" });
+      .catch((err) => {
+        const isNetwork = !err?.response;
+        const msg = isNetwork
+          ? `Сервер недоступен. Проверьте VITE_API_URL (сейчас: ${import.meta.env.VITE_API_URL ?? "/api"})`
+          : "Товар не найден по штрихкоду";
+        setBarcodeApiError(msg);
+        startBarcode(); // restart scanner
       })
       .finally(() => setBarcodeLoading(false));
-  }, [barcode.result]);
+  }, [barcode.result, startBarcode]);
 
   // Product search
   useEffect(() => {
@@ -317,12 +320,10 @@ export default function AddPricePage() {
             {/* Scanning overlay */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="relative w-56 h-36">
-                {/* Corner brackets */}
                 <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-white rounded-tl" />
                 <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-white rounded-tr" />
                 <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-white rounded-bl" />
                 <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white rounded-br" />
-                {/* Scan line */}
                 {barcode.scanning && (
                   <div className="absolute left-1 right-1 h-0.5 bg-primary/80 animate-scan-line" style={{ top: "50%" }} />
                 )}
@@ -339,6 +340,12 @@ export default function AddPricePage() {
           <p className="text-center text-sm text-muted-foreground">
             {barcode.scanning ? "Наведите камеру на штрихкод" : barcode.error ?? "Запуск камеры..."}
           </p>
+
+          {barcodeApiError && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              {barcodeApiError}
+            </div>
+          )}
 
           {barcode.error && (
             <Button className="w-full" onClick={startBarcode}>Повторить</Button>
