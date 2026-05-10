@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Camera, Upload, X, Loader2, CheckCircle, Search, ChevronRight, ArrowLeft, Plus } from "lucide-react";
+import { Camera, Upload, X, Loader2, CheckCircle, Search, ChevronRight, ArrowLeft, Plus, Barcode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useCamera } from "@/hooks/useCamera";
+import { useBarcode } from "@/hooks/useBarcode";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useAuthStore } from "@/store/auth.store";
 import { pricesApi } from "@/api/prices.api";
@@ -15,10 +16,9 @@ import { toast } from "@/hooks/useToast";
 import type { AiRecognitionResult, Product } from "@priceradar/shared";
 
 type Step = "photo" | "ai" | "product" | "store" | "price" | "done";
+type CaptureMode = "barcode" | "photo";
 
 const CURRENCIES = ["USD", "EUR", "RUB", "GBP", "TRY", "CNY", "JPY", "KZT", "AED", "BRL"];
-
-// Sentinel product: user typed a name not found in DB
 const NEW_PRODUCT_ID = "__new__";
 
 export default function AddPricePage() {
@@ -27,10 +27,16 @@ export default function AddPricePage() {
   const { isAuthenticated } = useAuthStore();
   const { videoRef, state: cam, startCamera, capture, reset: resetCam, fromFile } = useCamera();
 
+  const barcodeVideoRef = useRef<HTMLVideoElement>(null);
+  const { state: barcode, start: startBarcode, stop: stopBarcode } = useBarcode(barcodeVideoRef);
+
   const prefill = location.state as { productId?: string; productName?: string } | null;
 
   const [step, setStep] = useState<Step>(prefill?.productId ? "store" : "photo");
+  const [captureMode, setCaptureMode] = useState<CaptureMode>("barcode");
   const [aiResult, setAiResult] = useState<AiRecognitionResult | null>(null);
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [barcodeApiError, setBarcodeApiError] = useState<string | null>(null);
 
   // Product
   const [productQuery, setProductQuery] = useState(prefill?.productName ?? "");
@@ -63,6 +69,69 @@ export default function AddPricePage() {
       navigate("/login", { state: { from: "/add-price" } });
     }
   }, [isAuthenticated, navigate]);
+
+  // Auto-start barcode scanner when tab is active on step "photo"
+  useEffect(() => {
+    if (step === "photo" && captureMode === "barcode") {
+      startBarcode();
+    } else {
+      stopBarcode();
+    }
+  }, [step, captureMode, startBarcode, stopBarcode]);
+
+  // Handle barcode scan result
+  useEffect(() => {
+    if (!barcode.result) return;
+    setBarcodeLoading(true);
+    setBarcodeApiError(null);
+    productsApi.lookupBarcode(barcode.result)
+      .then((data) => {
+        const p = data.product;
+        if (data.source === "local" && p.id) {
+          setSelectedProduct({
+            id: p.id,
+            name: p.name,
+            brand: p.brand ?? null,
+            barcode: p.barcode,
+            categoryId: null,
+            imageUrl: p.imageUrl ?? null,
+            aiGenerated: false,
+            aiConfirmed: true,
+            aliases: [],
+            createdBy: "",
+            createdAt: new Date().toISOString(),
+          });
+          setStep("store");
+          toast({ title: "Товар найден!", description: p.name });
+        } else {
+          // Open Food Facts result — auto-select and jump to store step
+          setSelectedProduct({
+            id: NEW_PRODUCT_ID,
+            name: p.name,
+            brand: p.brand ?? null,
+            barcode: barcode.result,
+            categoryId: null,
+            imageUrl: p.imageUrl ?? null,
+            aiGenerated: true,
+            aiConfirmed: false,
+            aliases: [],
+            createdBy: "",
+            createdAt: new Date().toISOString(),
+          });
+          setStep("store");
+          toast({ title: "Товар найден!", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""}` });
+        }
+      })
+      .catch((err) => {
+        const isNetwork = !err?.response;
+        const msg = isNetwork
+          ? `Сервер недоступен. Проверьте VITE_API_URL (сейчас: ${import.meta.env.VITE_API_URL ?? "/api"})`
+          : "Товар не найден по штрихкоду";
+        setBarcodeApiError(msg);
+        startBarcode(); // restart scanner
+      })
+      .finally(() => setBarcodeLoading(false));
+  }, [barcode.result, startBarcode]);
 
   // Product search
   useEffect(() => {
@@ -160,19 +229,24 @@ export default function AddPricePage() {
       toast({ title: "Введите название магазина", variant: "destructive" });
       return;
     }
-    if (!newStoreCity) {
-      toast({ title: "Выберите город из списка", variant: "destructive" });
+    const cityName = newStoreCity?.name ?? newStoreCityQ.trim();
+    if (!cityName) {
+      toast({ title: "Введите название города", variant: "destructive" });
       return;
     }
-    // Use a sentinel store to signal "create new"
+    const cityForStore = newStoreCity ?? {
+      id: "__new__",
+      name: cityName,
+      country: { id: "__new__", name: "Russia", code: "RU", flagEmoji: "🇷🇺" },
+    };
     setSelectedStore({
       id: "__new__",
       name: newStoreName.trim(),
       chainName: null,
       address: null,
       city: {
-        ...newStoreCity,
-        country: { ...newStoreCity.country, flagEmoji: newStoreCity.country.flagEmoji ?? "" },
+        ...cityForStore,
+        country: { ...cityForStore.country, flagEmoji: cityForStore.country.flagEmoji ?? "" },
       },
     });
     setNewStoreMode(false);
@@ -190,15 +264,11 @@ export default function AddPricePage() {
     setPublishing(true);
     try {
       const fd = new FormData();
-
-      // Product: existing or new
       if (selectedProduct.id === NEW_PRODUCT_ID) {
         fd.append("productName", selectedProduct.name);
       } else {
         fd.append("productId", selectedProduct.id);
       }
-
-      // Store: existing or new
       if (selectedStore.id === "__new__") {
         fd.append("storeName", selectedStore.name);
         fd.append("cityName", selectedStore.city.name);
@@ -206,7 +276,6 @@ export default function AddPricePage() {
       } else {
         fd.append("storeId", selectedStore.id);
       }
-
       fd.append("price", String(priceNum));
       fd.append("currencyCode", currency);
       if (aiResult?.name) fd.append("aiRecognizedName", aiResult.name);
@@ -233,53 +302,125 @@ export default function AddPricePage() {
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)}><ArrowLeft className="h-5 w-5" /></Button>
         <div>
           <h1 className="font-bold">Добавить цену</h1>
-          <p className="text-xs text-muted-foreground">Шаг 1 из 4 — Фото</p>
+          <p className="text-xs text-muted-foreground">Шаг 1 из 4</p>
         </div>
       </div>
 
-      <div className="rounded-xl border bg-card overflow-hidden">
-        {cam.isActive ? (
-          <div className="relative">
-            <video ref={videoRef} className="w-full aspect-[4/3] object-cover bg-black" playsInline muted autoPlay />
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-              <Button size="lg" className="rounded-full h-14 w-14 p-0 shadow-xl" onClick={handleCapture}>
-                <Camera className="h-6 w-6" />
-              </Button>
+      {/* Mode tabs */}
+      <div className="flex rounded-xl border overflow-hidden">
+        <button
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${captureMode === "barcode" ? "bg-primary text-primary-foreground" : "hover:bg-accent/40"}`}
+          onClick={() => { setCaptureMode("barcode"); resetCam(); }}
+        >
+          <Barcode className="h-4 w-4" /> Штрихкод
+        </button>
+        <button
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${captureMode === "photo" ? "bg-primary text-primary-foreground" : "hover:bg-accent/40"}`}
+          onClick={() => { setCaptureMode("photo"); stopBarcode(); }}
+        >
+          <Camera className="h-4 w-4" /> Фото ценника
+        </button>
+      </div>
+
+      {/* Barcode mode */}
+      {captureMode === "barcode" && (
+        <div className="space-y-3">
+          <div className="rounded-xl border bg-card overflow-hidden relative">
+            <video
+              ref={barcodeVideoRef}
+              className="w-full aspect-[4/3] object-cover bg-black"
+              playsInline
+              muted
+              autoPlay
+            />
+            {/* Scanning overlay */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="relative w-56 h-36">
+                <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-white rounded-tl" />
+                <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-white rounded-tr" />
+                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-white rounded-bl" />
+                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white rounded-br" />
+                {barcode.scanning && (
+                  <div className="absolute left-1 right-1 h-0.5 bg-primary/80 animate-scan-line" style={{ top: "50%" }} />
+                )}
+              </div>
             </div>
-            <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-black/40 text-white hover:bg-black/60" onClick={resetCam}>
-              <X className="h-4 w-4" />
+            {barcodeLoading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                <Loader2 className="h-8 w-8 animate-spin text-white" />
+                <span className="text-white ml-2 text-sm">Поиск товара...</span>
+              </div>
+            )}
+          </div>
+
+          <p className="text-center text-sm text-muted-foreground">
+            {barcode.scanning ? "Наведите камеру на штрихкод" : barcode.error ?? "Запуск камеры..."}
+          </p>
+
+          {barcodeApiError && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              {barcodeApiError}
+            </div>
+          )}
+
+          {barcode.error && (
+            <Button className="w-full" onClick={startBarcode}>Повторить</Button>
+          )}
+
+          <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("product")}>
+            Нет штрихкода → ввести вручную
+          </Button>
+        </div>
+      )}
+
+      {/* Photo mode */}
+      {captureMode === "photo" && (
+        <div className="space-y-3">
+          <div className="rounded-xl border bg-card overflow-hidden">
+            {cam.isActive ? (
+              <div className="relative">
+                <video ref={videoRef} className="w-full aspect-[4/3] object-cover bg-black" playsInline muted autoPlay />
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+                  <Button size="lg" className="rounded-full h-14 w-14 p-0 shadow-xl" onClick={handleCapture}>
+                    <Camera className="h-6 w-6" />
+                  </Button>
+                </div>
+                <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-black/40 text-white hover:bg-black/60" onClick={resetCam}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : cam.capturedUrl ? (
+              <div className="relative">
+                <img src={cam.capturedUrl} alt="captured" className="w-full aspect-[4/3] object-cover" />
+                <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-black/40 text-white hover:bg-black/60" onClick={resetCam}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="aspect-[4/3] flex flex-col items-center justify-center gap-4 text-muted-foreground">
+                <Camera className="h-12 w-12 opacity-30" />
+                <p className="text-sm">Сфотографируйте ценник</p>
+              </div>
+            )}
+          </div>
+
+          {cam.error && <p className="text-sm text-destructive text-center">{cam.error}</p>}
+
+          <div className="grid grid-cols-2 gap-3">
+            <Button className="gap-2" onClick={startCamera} disabled={cam.isActive}>
+              <Camera className="h-4 w-4" /> Открыть камеру
             </Button>
-          </div>
-        ) : cam.capturedUrl ? (
-          <div className="relative">
-            <img src={cam.capturedUrl} alt="captured" className="w-full aspect-[4/3] object-cover" />
-            <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-black/40 text-white hover:bg-black/60" onClick={resetCam}>
-              <X className="h-4 w-4" />
+            <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="h-4 w-4" /> Загрузить фото
             </Button>
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
           </div>
-        ) : (
-          <div className="aspect-[4/3] flex flex-col items-center justify-center gap-4 text-muted-foreground">
-            <Camera className="h-12 w-12 opacity-30" />
-            <p className="text-sm">Сфотографируйте ценник</p>
-          </div>
-        )}
-      </div>
 
-      {cam.error && <p className="text-sm text-destructive text-center">{cam.error}</p>}
-
-      <div className="grid grid-cols-2 gap-3">
-        <Button className="gap-2" onClick={startCamera} disabled={cam.isActive}>
-          <Camera className="h-4 w-4" /> Открыть камеру
-        </Button>
-        <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()}>
-          <Upload className="h-4 w-4" /> Загрузить фото
-        </Button>
-        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
-      </div>
-
-      <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("product")}>
-        Пропустить фото → ввести вручную
-      </Button>
+          <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("product")}>
+            Пропустить фото → ввести вручную
+          </Button>
+        </div>
+      )}
     </div>
   );
 
@@ -308,7 +449,7 @@ export default function AddPricePage() {
 
       {aiResult?.name && (
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-          <p className="text-xs text-primary font-medium mb-1">ИИ определил:</p>
+          <p className="text-xs text-primary font-medium mb-1">Определено:</p>
           <p className="font-medium">{aiResult.name}</p>
           {aiResult.brand && <p className="text-sm text-muted-foreground">{aiResult.brand}</p>}
           <Badge variant="outline" className="mt-1 text-[10px]">
@@ -407,7 +548,7 @@ export default function AddPricePage() {
             )}
 
             {newStoreCityQ.length >= 2 && newStoreCityResults.length === 0 && !newStoreCity && (
-              <p className="text-xs text-muted-foreground mt-1">Город не найден в базе. Попробуйте по-английски (Moscow, Kazan...)</p>
+              <p className="text-xs text-emerald-600 mt-1">Новый город «{newStoreCityQ}» будет создан автоматически</p>
             )}
 
             {newStoreCity && (
