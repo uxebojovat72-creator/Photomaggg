@@ -30,7 +30,6 @@ export default function AddPricePage() {
   const prefill = location.state as { productId?: string; productName?: string } | null;
 
   const [step, setStep] = useState<Step>(prefill?.productId ? "store" : "photo");
-  const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<AiRecognitionResult | null>(null);
 
   // Product
@@ -98,7 +97,6 @@ export default function AddPricePage() {
 
   const runAI = async (file: File) => {
     setStep("ai");
-    setAiLoading(true);
     try {
       const result = await pricesApi.recognize(file);
       setAiResult(result);
@@ -118,7 +116,6 @@ export default function AddPricePage() {
         variant: "destructive",
       });
     } finally {
-      setAiLoading(false);
       setStep("product");
     }
   };
