@@ -27,6 +27,15 @@ export const productsApi = {
   lookupBarcode: (code: string) =>
     api.get<{
       source: "local" | "openfoodfacts";
-      product: { name: string; brand: string | null; barcode: string; imageUrl: string | null; categoryHint?: string | null; id?: string };
+      product: {
+        name: string;
+        brand: string | null;
+        barcode: string;
+        imageUrl: string | null;
+        quantity?: string | null;
+        description?: string | null;
+        categoryHint?: string | null;
+        id?: string;
+      };
     }>(`/products/barcode/${code}`).then((r) => r.data),
 };
