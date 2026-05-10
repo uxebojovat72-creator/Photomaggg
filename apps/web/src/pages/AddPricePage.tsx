@@ -503,9 +503,32 @@ export default function AddPricePage() {
         <Button variant="ghost" size="icon" onClick={() => { setNewStoreMode(false); setStep("product"); }}><ArrowLeft className="h-5 w-5" /></Button>
         <div>
           <h1 className="font-bold">{newStoreMode ? "Новый магазин" : "Выбрать магазин"}</h1>
-          <p className="text-xs text-muted-foreground">Шаг 3 из 4 — {selectedProduct?.name}</p>
+          <p className="text-xs text-muted-foreground">Шаг 3 из 4</p>
         </div>
       </div>
+
+      {selectedProduct && (
+        <div className="rounded-xl border bg-card overflow-hidden flex gap-3 p-3">
+          {selectedProduct.imageUrl ? (
+            <img
+              src={selectedProduct.imageUrl}
+              alt={selectedProduct.name}
+              className="h-20 w-20 rounded-lg object-contain bg-white flex-shrink-0 border"
+            />
+          ) : (
+            <div className="h-20 w-20 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 text-3xl">📦</div>
+          )}
+          <div className="flex-1 min-w-0 py-0.5">
+            <p className="font-semibold leading-tight">{selectedProduct.name}</p>
+            {selectedProduct.brand && (
+              <p className="text-sm text-muted-foreground mt-0.5">{selectedProduct.brand}</p>
+            )}
+            {selectedProduct.barcode && (
+              <p className="text-xs text-muted-foreground mt-1 font-mono">{selectedProduct.barcode}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {newStoreMode ? (
         <div className="space-y-3">
@@ -621,18 +644,35 @@ export default function AddPricePage() {
         </div>
       </div>
 
-      <div className="rounded-lg border bg-card p-3 space-y-1.5">
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Товар</span>
-          <span className="font-medium truncate ml-4 max-w-[60%] text-right">{selectedProduct?.name}</span>
-        </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-muted-foreground">Магазин</span>
-          <span className="font-medium">{selectedStore?.name}, {selectedStore?.city.name} {selectedStore?.city.country.flagEmoji}</span>
-        </div>
-        {cam.capturedUrl && (
-          <img src={cam.capturedUrl} alt="" className="h-20 w-full rounded object-cover mt-2" />
+      <div className="rounded-xl border bg-card overflow-hidden">
+        {(selectedProduct?.imageUrl || cam.capturedUrl) && (
+          <img
+            src={selectedProduct?.imageUrl ?? cam.capturedUrl ?? ""}
+            alt=""
+            className="w-full h-40 object-contain bg-white border-b"
+          />
         )}
+        <div className="p-3 space-y-1.5">
+          <div className="flex justify-between text-sm gap-4">
+            <span className="text-muted-foreground shrink-0">Товар</span>
+            <div className="text-right min-w-0">
+              <span className="font-medium block truncate">{selectedProduct?.name}</span>
+              {selectedProduct?.brand && (
+                <span className="text-xs text-muted-foreground">{selectedProduct.brand}</span>
+              )}
+            </div>
+          </div>
+          {selectedProduct?.barcode && (
+            <div className="flex justify-between text-sm gap-4">
+              <span className="text-muted-foreground shrink-0">Штрихкод</span>
+              <span className="font-mono text-xs text-muted-foreground">{selectedProduct.barcode}</span>
+            </div>
+          )}
+          <div className="flex justify-between text-sm gap-4">
+            <span className="text-muted-foreground shrink-0">Магазин</span>
+            <span className="font-medium text-right">{selectedStore?.name}, {selectedStore?.city.name} {selectedStore?.city.country.flagEmoji}</span>
+          </div>
+        </div>
       </div>
 
       <div className="space-y-2">
