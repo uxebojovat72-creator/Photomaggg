@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Camera, Upload, X, Loader2, CheckCircle, Search, ChevronRight, ArrowLeft, Plus, Barcode } from "lucide-react";
+import { Camera, Upload, X, Loader2, CheckCircle, Search, ChevronRight, ArrowLeft, Plus, Barcode, Sparkles, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +37,24 @@ export default function AddPricePage() {
   const [aiResult, setAiResult] = useState<AiRecognitionResult | null>(null);
   const [barcodeLoading, setBarcodeLoading] = useState(false);
   const [barcodeApiError, setBarcodeApiError] = useState<string | null>(null);
+  const [productExtra, setProductExtra] = useState<{
+    quantity?: string | null;
+    description?: string | null;
+    categoryHint?: string | null;
+  } | null>(null);
+
+  // Store price AI lookup
+  const [aiPriceLoading, setAiPriceLoading] = useState(false);
+  const [aiPriceResult, setAiPriceResult] = useState<{
+    found: boolean;
+    price?: number;
+    pricePromo?: number;
+    currency: string;
+    productName?: string;
+    storeDisplayName?: string;
+    productUrl?: string;
+    searchUrl: string;
+  } | null>(null);
 
   // Product
   const [productQuery, setProductQuery] = useState(prefill?.productName ?? "");
@@ -101,6 +119,7 @@ export default function AddPricePage() {
             createdBy: "",
             createdAt: new Date().toISOString(),
           });
+          setProductExtra({ quantity: p.quantity, description: p.description, categoryHint: p.categoryHint });
           setStep("store");
           toast({ title: "Товар найден!", description: p.name });
         } else {
@@ -118,6 +137,7 @@ export default function AddPricePage() {
             createdBy: "",
             createdAt: new Date().toISOString(),
           });
+          setProductExtra({ quantity: p.quantity, description: p.description, categoryHint: p.categoryHint });
           setStep("store");
           toast({ title: "Товар найден!", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""}` });
         }
@@ -214,7 +234,30 @@ export default function AddPricePage() {
   const selectStore = (s: StoreResult) => {
     setSelectedStore(s);
     setNewStoreMode(false);
+    setAiPriceResult(null);
     setStep("price");
+  };
+
+  const handleAiPriceLookup = async () => {
+    if (!selectedStore || !selectedProduct) return;
+    setAiPriceLoading(true);
+    setAiPriceResult(null);
+    try {
+      const result = await pricesApi.lookupStorePrice({
+        storeName: selectedStore.name,
+        barcode: selectedProduct.barcode,
+        productName: selectedProduct.name,
+      });
+      setAiPriceResult(result);
+      if (result.found && result.price != null) {
+        setPrice(String(result.pricePromo ?? result.price));
+        toast({ title: "Цена найдена!", description: `${result.pricePromo ?? result.price} ${result.currency} на ${result.storeDisplayName ?? selectedStore.name}` });
+      }
+    } catch {
+      setAiPriceResult({ found: false, currency: "RUB", searchUrl: `https://yandex.ru/search/?text=${encodeURIComponent(`${selectedProduct.name} ${selectedStore.name} цена`)}` });
+    } finally {
+      setAiPriceLoading(false);
+    }
   };
 
   const enterNewStoreMode = () => {
@@ -508,23 +551,34 @@ export default function AddPricePage() {
       </div>
 
       {selectedProduct && (
-        <div className="rounded-xl border bg-card overflow-hidden flex gap-3 p-3">
-          {selectedProduct.imageUrl ? (
+        <div className="rounded-xl border bg-card overflow-hidden">
+          {selectedProduct.imageUrl && (
             <img
               src={selectedProduct.imageUrl}
               alt={selectedProduct.name}
-              className="h-20 w-20 rounded-lg object-contain bg-white flex-shrink-0 border"
+              className="w-full h-48 object-contain bg-white border-b"
             />
-          ) : (
-            <div className="h-20 w-20 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 text-3xl">📦</div>
           )}
-          <div className="flex-1 min-w-0 py-0.5">
-            <p className="font-semibold leading-tight">{selectedProduct.name}</p>
+          <div className="p-3 space-y-1">
+            <p className="font-bold text-base leading-snug">{selectedProduct.name}</p>
             {selectedProduct.brand && (
-              <p className="text-sm text-muted-foreground mt-0.5">{selectedProduct.brand}</p>
+              <p className="text-sm text-muted-foreground">{selectedProduct.brand}</p>
             )}
-            {selectedProduct.barcode && (
-              <p className="text-xs text-muted-foreground mt-1 font-mono">{selectedProduct.barcode}</p>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {productExtra?.quantity && (
+                <span className="text-xs bg-muted px-2 py-0.5 rounded-full">{productExtra.quantity}</span>
+              )}
+              {productExtra?.categoryHint && (
+                <span className="text-xs bg-muted px-2 py-0.5 rounded-full capitalize">{productExtra.categoryHint}</span>
+              )}
+              {selectedProduct.barcode && (
+                <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded-full">{selectedProduct.barcode}</span>
+              )}
+            </div>
+            {productExtra?.description && (
+              <p className="text-xs text-muted-foreground mt-1 line-clamp-3 leading-relaxed">
+                <span className="font-medium">Состав: </span>{productExtra.description}
+              </p>
             )}
           </div>
         </div>
@@ -644,36 +698,98 @@ export default function AddPricePage() {
         </div>
       </div>
 
+      {/* Product info card */}
       <div className="rounded-xl border bg-card overflow-hidden">
         {(selectedProduct?.imageUrl || cam.capturedUrl) && (
           <img
             src={selectedProduct?.imageUrl ?? cam.capturedUrl ?? ""}
             alt=""
-            className="w-full h-40 object-contain bg-white border-b"
+            className="w-full h-48 object-contain bg-white border-b"
           />
         )}
         <div className="p-3 space-y-1.5">
-          <div className="flex justify-between text-sm gap-4">
-            <span className="text-muted-foreground shrink-0">Товар</span>
-            <div className="text-right min-w-0">
-              <span className="font-medium block truncate">{selectedProduct?.name}</span>
-              {selectedProduct?.brand && (
-                <span className="text-xs text-muted-foreground">{selectedProduct.brand}</span>
-              )}
-            </div>
-          </div>
-          {selectedProduct?.barcode && (
-            <div className="flex justify-between text-sm gap-4">
-              <span className="text-muted-foreground shrink-0">Штрихкод</span>
-              <span className="font-mono text-xs text-muted-foreground">{selectedProduct.barcode}</span>
-            </div>
+          <p className="font-bold text-base">{selectedProduct?.name}</p>
+          {selectedProduct?.brand && (
+            <p className="text-sm text-muted-foreground">{selectedProduct.brand}</p>
           )}
-          <div className="flex justify-between text-sm gap-4">
-            <span className="text-muted-foreground shrink-0">Магазин</span>
-            <span className="font-medium text-right">{selectedStore?.name}, {selectedStore?.city.name} {selectedStore?.city.country.flagEmoji}</span>
+          <div className="flex flex-wrap gap-2">
+            {productExtra?.quantity && (
+              <span className="text-xs bg-muted px-2 py-0.5 rounded-full">{productExtra.quantity}</span>
+            )}
+            {productExtra?.categoryHint && (
+              <span className="text-xs bg-muted px-2 py-0.5 rounded-full capitalize">{productExtra.categoryHint}</span>
+            )}
+            {selectedProduct?.barcode && (
+              <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded-full">{selectedProduct.barcode}</span>
+            )}
+          </div>
+          {productExtra?.description && (
+            <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+              <span className="font-medium">Состав: </span>{productExtra.description}
+            </p>
+          )}
+          <div className="border-t pt-2 mt-1 flex justify-between text-sm">
+            <span className="text-muted-foreground">Магазин</span>
+            <span className="font-medium">{selectedStore?.name}, {selectedStore?.city.name} {selectedStore?.city.country.flagEmoji}</span>
           </div>
         </div>
       </div>
+
+      {/* AI price lookup */}
+      {!aiPriceResult && !aiPriceLoading && (
+        <Button variant="outline" className="w-full gap-2" onClick={handleAiPriceLookup}>
+          <Sparkles className="h-4 w-4 text-primary" />
+          Найти цену на сайте {selectedStore?.name}
+        </Button>
+      )}
+
+      {aiPriceLoading && (
+        <div className="flex items-center gap-3 p-3 rounded-xl border text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin text-primary flex-shrink-0" />
+          Ищу цену на сайте {selectedStore?.name}...
+        </div>
+      )}
+
+      {aiPriceResult && aiPriceResult.found && (
+        <div className="rounded-xl border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-bold text-emerald-700 dark:text-emerald-400 text-lg">
+                {aiPriceResult.pricePromo ?? aiPriceResult.price} ₽
+                {aiPriceResult.pricePromo && (
+                  <span className="text-sm font-normal line-through text-muted-foreground ml-2">{aiPriceResult.price} ₽</span>
+                )}
+              </p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-0.5">
+                {aiPriceResult.storeDisplayName} · цена с сайта
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {aiPriceResult.productUrl && (
+                <a href={aiPriceResult.productUrl} target="_blank" rel="noopener noreferrer">
+                  <Button size="sm" variant="outline" className="gap-1">
+                    <ExternalLink className="h-3 w-3" /> Сайт
+                  </Button>
+                </a>
+              )}
+            </div>
+          </div>
+          {aiPriceResult.productName && (
+            <p className="text-xs text-muted-foreground truncate">{aiPriceResult.productName}</p>
+          )}
+        </div>
+      )}
+
+      {aiPriceResult && !aiPriceResult.found && (
+        <div className="rounded-xl border border-orange-200 bg-orange-50 dark:bg-orange-950/20 p-3 flex items-center justify-between">
+          <p className="text-sm text-orange-700 dark:text-orange-400">Цена не найдена автоматически</p>
+          <a href={aiPriceResult.searchUrl} target="_blank" rel="noopener noreferrer">
+            <Button size="sm" variant="outline" className="gap-1">
+              <ExternalLink className="h-3 w-3" /> Яндекс
+            </Button>
+          </a>
+        </div>
+      )}
 
       <div className="space-y-2">
         <label className="text-sm font-medium">Цена</label>
@@ -720,6 +836,8 @@ export default function AddPricePage() {
           setSelectedStore(null);
           setPrice("");
           setAiResult(null);
+          setProductExtra(null);
+          setAiPriceResult(null);
           setProductQuery("");
           setStoreQuery("");
           setNewStoreMode(false);
