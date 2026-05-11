@@ -1,5 +1,5 @@
 /**
- * Multi-source barcode lookup with AI name cleanup.
+ * Multi-source barcode lookup with AI fallback.
  *
  * All external sources fire in parallel:
  *   • 5ka.ru          — Russian store, live prices (priority if found)
@@ -10,10 +10,9 @@
  *   • OpenBeautyFacts — cosmetics
  *   • OpenPetFoodFacts— pet food
  *   • UPCitemdb       — Western barcodes
- *   • OpenFoodFacts   — LAST RESORT (garbled names fixed by Groq Vision)
+ *   • Groq AI         — LAST RESORT: LLM asked for barcode by number
  *
- * Russian store APIs may be blocked on datacenter IPs — OFF is the safety net.
- * When OFF returns a garbled name + has image → Groq Vision reads the real label.
+ * Russian store APIs may be blocked on datacenter IPs — Groq AI is the safety net.
  */
 
 import { env } from "../lib/env.js";
@@ -36,10 +35,10 @@ export interface BarcodeProduct {
     | "magnit"
     | "vkusvill"
     | "barcodelist"
-    | "openfoodfacts"
     | "openbeautyfacts"
     | "openpetfoodfacts"
-    | "upcitemdb";
+    | "upcitemdb"
+    | "ai";
 }
 
 const UA = "PriceRadar/1.0 (github.com/priceradar)";
@@ -325,41 +324,56 @@ async function tryBarcodeList(code: string): Promise<BarcodeProduct | null> {
   }
 }
 
-// ─── OpenFoodFacts (last resort — names often garbled, fixed by Groq Vision) ──
+// ─── Groq AI text lookup (last resort — LLM knows many product barcodes) ─────
 
-const OFF_FIELDS =
-  "product_name_ru,product_name,brands,quantity,image_front_url,image_url,ingredients_text_ru,ingredients_text,categories_tags";
-
-async function tryOpenFoodFacts(code: string): Promise<BarcodeProduct | null> {
+async function tryGroqBarcode(code: string): Promise<BarcodeProduct | null> {
+  if (!env.GROQ_API_KEY) return null;
   try {
-    const res = await fetch(
-      `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${OFF_FIELDS}&lc=ru`,
-      { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8000) }
-    );
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.GROQ_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          {
+            role: "user",
+            content:
+              `Штрихкод EAN-13: ${code}\n\n` +
+              `Найди точное название товара, бренд, объём/вес и категорию.\n` +
+              `Отвечай ТОЛЬКО JSON без пояснений:\n` +
+              `{"name":"полное название","brand":"бренд или null","quantity":"объём/вес или null","category":"категория или null","confidence":0.0}\n\n` +
+              `Если штрихкод неизвестен — верни {"name":null}`,
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 150,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
     if (!res.ok) return null;
-    type R = {
-      status: number;
-      product?: {
-        product_name_ru?: string; product_name?: string; brands?: string;
-        quantity?: string; image_front_url?: string; image_url?: string;
-        ingredients_text_ru?: string; ingredients_text?: string; categories_tags?: string[];
-      };
-    };
+    type R = { choices?: Array<{ message?: { content?: string } }> };
     const data = (await res.json()) as R;
-    if (data.status !== 1 || !data.product) return null;
-    const p = data.product;
-    const name = p.product_name_ru || p.product_name || "";
-    if (!name) return null;
-    const rawIng = p.ingredients_text_ru || p.ingredients_text || "";
+    const text = data.choices?.[0]?.message?.content?.trim();
+    if (!text) return null;
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    type P = { name?: string | null; brand?: string | null; quantity?: string | null; category?: string | null; confidence?: number };
+    const parsed = JSON.parse(match[0]) as P;
+    if (!parsed.name || parsed.name.trim().length < 3) return null;
+    if (typeof parsed.confidence === "number" && parsed.confidence < 0.3) return null;
+    console.log(`[Groq AI] barcode ${code} → "${parsed.name}"`);
     return {
-      name: name.trim(),
-      brand: p.brands?.split(",")[0].trim() ?? null,
+      name: parsed.name.trim(),
+      brand: parsed.brand ?? null,
       barcode: code,
-      imageUrl: p.image_front_url ?? p.image_url ?? null,
-      quantity: p.quantity ?? null,
-      description: rawIng ? rawIng.replace(/_/g, "").substring(0, 300) : null,
-      categoryHint: p.categories_tags?.[0]?.replace(/^en:|^ru:/, "") ?? null,
-      source: "openfoodfacts",
+      imageUrl: null,
+      quantity: parsed.quantity ?? null,
+      description: null,
+      categoryHint: parsed.category ?? null,
+      source: "ai",
     };
   } catch {
     return null;
@@ -513,12 +527,10 @@ function bestResult(results: (BarcodeProduct | null)[]): BarcodeProduct | null {
 
 /**
  * Query all external barcode sources in parallel and return the best result.
- * Priority: RU stores → barcode-list.ru → beauty/pet/UPC → OpenFoodFacts (AI-cleaned)
- * Russian store APIs may be blocked on datacenter IPs — OFF is the safety net.
- * When any source returns a garbled name + has image → Groq Vision reads the real label.
+ * Priority: RU stores → barcode-list.ru → beauty/pet/UPC → Groq AI text lookup
  */
 export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduct | null> {
-  const [fiveKa, perek, magnit, vkusvill, barcodeList, beauty, pet, upc, off] =
+  const [fiveKa, perek, magnit, vkusvill, barcodeList, beauty, pet, upc] =
     await Promise.all([
       try5ka(code),
       tryPerekrestok(code),
@@ -528,10 +540,8 @@ export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduc
       tryOpenBeautyFacts(code),
       tryOpenPetFoodFacts(code),
       tryUPCitemdb(code),
-      tryOpenFoodFacts(code),   // last resort — always AI-cleaned below
     ]);
 
-  // Helper: return result after optional AI name cleanup
   async function withCleanup(r: BarcodeProduct): Promise<BarcodeProduct> {
     if (isGarbledName(r.name) && r.imageUrl) {
       const { name: cleanName, brand: aiBrand } = await cleanNameWithGroq(r.imageUrl, r.name);
@@ -544,7 +554,7 @@ export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduc
   const ruStore = bestResult([fiveKa, perek, magnit, vkusvill]);
   if (ruStore) {
     if (!ruStore.imageUrl) {
-      const withImg = bestResult([beauty, pet, upc, off]);
+      const withImg = bestResult([beauty, pet, upc]);
       if (withImg?.imageUrl) ruStore.imageUrl = withImg.imageUrl;
     }
     return ruStore;
@@ -552,7 +562,7 @@ export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduc
 
   // 2. barcode-list.ru — reliable Russian name, merge image if available
   if (barcodeList) {
-    const withImage = bestResult([beauty, pet, upc, off]);
+    const withImage = bestResult([beauty, pet, upc]);
     if (withImage?.imageUrl) {
       return {
         ...barcodeList,
@@ -569,15 +579,6 @@ export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduc
   const globalResult = bestResult([beauty, pet, upc]);
   if (globalResult) return withCleanup(globalResult);
 
-  // 4. OpenFoodFacts — last resort, ALWAYS run AI cleanup on the name
-  if (off) {
-    if (off.imageUrl) {
-      // Always clean — OFF names for Russian products are almost always garbled
-      const { name: cleanName, brand: aiBrand } = await cleanNameWithGroq(off.imageUrl, off.name);
-      return { ...off, name: cleanName, brand: off.brand ?? aiBrand };
-    }
-    return off; // no image → can't AI-clean, return raw (better than nothing)
-  }
-
-  return null;
+  // 4. Last resort: ask Groq AI by barcode number
+  return tryGroqBarcode(code);
 }
