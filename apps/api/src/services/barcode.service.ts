@@ -7,13 +7,14 @@
  *   • Перекрёсток     — Russian store
  *   • Магнит          — Russian store
  *   • ВкусВилл        — Russian store
- *   • OpenFoodFacts   — global food DB
  *   • OpenBeautyFacts — cosmetics
  *   • OpenPetFoodFacts— pet food
  *   • UPCitemdb       — Western barcodes
  *
- * After picking the best result: if the name looks garbled and the product
- * image is available, Groq Vision reads the label and returns the correct name.
+ * OpenFoodFacts is excluded — gives garbled OCR names for Russian products.
+ *
+ * If the best result still has a garbled name and an image URL, Groq Vision
+ * reads the label from the photo and returns the correct name.
  */
 
 import { env } from "../lib/env.js";
@@ -36,7 +37,6 @@ export interface BarcodeProduct {
     | "magnit"
     | "vkusvill"
     | "barcodelist"
-    | "openfoodfacts"
     | "openbeautyfacts"
     | "openpetfoodfacts"
     | "upcitemdb";
@@ -45,8 +45,6 @@ export interface BarcodeProduct {
 const UA = "PriceRadar/1.0 (github.com/priceradar)";
 const MOB_UA =
   "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
-const OFF_FIELDS =
-  "product_name_ru,product_name,brands,quantity,image_front_url,image_url,ingredients_text_ru,ingredients_text,categories_tags";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -327,50 +325,6 @@ async function tryBarcodeList(code: string): Promise<BarcodeProduct | null> {
   }
 }
 
-// ─── OpenFoodFacts ────────────────────────────────────────────────────────────
-
-async function tryOpenFoodFacts(code: string): Promise<BarcodeProduct | null> {
-  try {
-    const res = await fetch(
-      `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${OFF_FIELDS}&lc=ru`,
-      { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8000) }
-    );
-    if (!res.ok) return null;
-    type R = {
-      status: number;
-      product?: {
-        product_name_ru?: string;
-        product_name?: string;
-        brands?: string;
-        quantity?: string;
-        image_front_url?: string;
-        image_url?: string;
-        ingredients_text_ru?: string;
-        ingredients_text?: string;
-        categories_tags?: string[];
-      };
-    };
-    const data = (await res.json()) as R;
-    if (data.status !== 1 || !data.product) return null;
-    const p = data.product;
-    const name = p.product_name_ru || p.product_name || "";
-    if (!name) return null;
-    const rawIng = p.ingredients_text_ru || p.ingredients_text || "";
-    return {
-      name: name.trim(),
-      brand: p.brands?.split(",")[0].trim() ?? null,
-      barcode: code,
-      imageUrl: p.image_front_url ?? p.image_url ?? null,
-      quantity: p.quantity ?? null,
-      description: rawIng ? rawIng.replace(/_/g, "").substring(0, 300) : null,
-      categoryHint: p.categories_tags?.[0]?.replace(/^en:|^ru:/, "") ?? null,
-      source: "openfoodfacts",
-    };
-  } catch {
-    return null;
-  }
-}
-
 // ─── OpenBeautyFacts ──────────────────────────────────────────────────────────
 
 async function tryOpenBeautyFacts(code: string): Promise<BarcodeProduct | null> {
@@ -518,20 +472,19 @@ function bestResult(results: (BarcodeProduct | null)[]): BarcodeProduct | null {
 
 /**
  * Query all external barcode sources in parallel and return the best result.
- * Russian store APIs (5ka, Перекрёсток, Магнит, ВкусВилл) take priority because
- * they have proper Russian product names and live prices.
+ * Russian store APIs (5ka, Перекрёсток, Магнит, ВкусВилл) take priority.
+ * OpenFoodFacts is excluded — gives garbled OCR names for Russian products.
  * If the best result still has a garbled name and an image URL, Groq Vision
  * reads the label from the photo and returns the correct name.
  */
 export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduct | null> {
-  const [fiveKa, perek, magnit, vkusvill, barcodeList, off, beauty, pet, upc] =
+  const [fiveKa, perek, magnit, vkusvill, barcodeList, beauty, pet, upc] =
     await Promise.all([
       try5ka(code),
       tryPerekrestok(code),
       tryMagnit(code),
       tryVkusvill(code),
       tryBarcodeList(code),
-      tryOpenFoodFacts(code),
       tryOpenBeautyFacts(code),
       tryOpenPetFoodFacts(code),
       tryUPCitemdb(code),
@@ -541,17 +494,17 @@ export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduc
   const ruStore = bestResult([fiveKa, perek, magnit, vkusvill]);
 
   if (ruStore) {
-    // If OFF/etc have an image that the store result lacks, merge it in
+    // If the store result has no image, try to get one from beauty/pet/upc
     if (!ruStore.imageUrl) {
-      const fallback = bestResult([off, beauty, pet, upc, barcodeList]);
-      if (fallback?.imageUrl) ruStore.imageUrl = fallback.imageUrl;
+      const withImg = bestResult([beauty, pet, upc, barcodeList]);
+      if (withImg?.imageUrl) ruStore.imageUrl = withImg.imageUrl;
     }
     return ruStore;
   }
 
-  // barcode-list.ru has reliable Russian names even without prices/images
+  // barcode-list.ru — reliable Russian name, merge image from other sources if available
   if (barcodeList) {
-    const withImage = bestResult([off, beauty, pet, upc]);
+    const withImage = bestResult([beauty, pet, upc]);
     if (withImage?.imageUrl) {
       return {
         ...barcodeList,
@@ -564,21 +517,17 @@ export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduc
     return barcodeList;
   }
 
-  // Fallback: global databases (OFF, beauty, pet, UPC)
-  const result = bestResult([off, beauty, pet, upc]);
+  // Fallback: cosmetics / pet food / Western barcodes
+  const result = bestResult([beauty, pet, upc]);
   if (!result) return null;
 
-  // AI name cleanup — if the name looks like OCR garbage and we have an image
+  // AI name cleanup: if still garbled and we have an image, ask Groq to read the label
   if (isGarbledName(result.name) && result.imageUrl) {
     const { name: cleanName, brand: aiBrand } = await cleanNameWithGroq(
       result.imageUrl,
       result.name
     );
-    return {
-      ...result,
-      name: cleanName,
-      brand: result.brand ?? aiBrand,
-    };
+    return { ...result, name: cleanName, brand: result.brand ?? aiBrand };
   }
 
   return result;
