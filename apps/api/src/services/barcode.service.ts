@@ -1,7 +1,7 @@
 /**
  * Multi-source barcode lookup.
- * Priority: local DB → OpenFoodFacts → OpenBeautyFacts → OpenPetFoodFacts → UPCitemdb
- * All external sources are queried in parallel after local DB miss.
+ * Priority: local DB → 5ka (Russian store, has live prices) → OpenFoodFacts → OpenBeautyFacts → OpenPetFoodFacts → UPCitemdb
+ * All external sources are queried in parallel after local DB miss; 5ka result takes priority.
  */
 
 export interface BarcodeProduct {
@@ -12,12 +12,55 @@ export interface BarcodeProduct {
   quantity: string | null;
   description: string | null;
   categoryHint: string | null;
+  price?: number | null;
+  pricePromo?: number | null;
+  storeSource?: string | null;
   /** Where the data came from */
-  source: "local" | "openfoodfacts" | "openbeautyfacts" | "openpetfoodfacts" | "upcitemdb";
+  source: "local" | "openfoodfacts" | "openbeautyfacts" | "openpetfoodfacts" | "upcitemdb" | "5ka";
 }
 
 const OFF_FIELDS = "product_name_ru,product_name,brands,quantity,image_front_url,image_url,ingredients_text_ru,ingredients_text,categories_tags";
 const UA = "PriceRadar/1.0 (github.com/priceradar)";
+const MOBILE_UA = "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
+
+async function try5kaByBarcode(code: string): Promise<BarcodeProduct | null> {
+  try {
+    const res = await fetch(
+      `https://5ka.ru/api/v2/search/products/?query=${encodeURIComponent(code)}&records_per_page=5`,
+      {
+        headers: { "User-Agent": MOBILE_UA, "Accept": "application/json" },
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) return null;
+    type Item = {
+      id: number;
+      name: string;
+      plu?: string;
+      photo?: string;
+      prices: { price_reg__min: number; price_promo__min: number | null };
+    };
+    type R = { count: number; results: Item[] };
+    const data = await res.json() as R;
+    const item = data.results?.find((r) => r.plu === code) ?? data.results?.[0];
+    if (!item?.name) return null;
+    return {
+      name: item.name,
+      brand: null,
+      barcode: code,
+      imageUrl: item.photo ?? null,
+      quantity: null,
+      description: null,
+      categoryHint: null,
+      price: item.prices.price_reg__min,
+      pricePromo: item.prices.price_promo__min ?? null,
+      storeSource: "Пятёрочка",
+      source: "5ka",
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function tryOpenFoodFacts(code: string): Promise<BarcodeProduct | null> {
   try {
@@ -173,13 +216,16 @@ function bestResult(results: (BarcodeProduct | null)[]): BarcodeProduct | null {
 
 /**
  * Query all external barcode sources in parallel and return the richest result.
+ * 5ka is checked alongside the others and takes priority (Russian names + live prices).
  */
 export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduct | null> {
-  const [off, beauty, pet, upc] = await Promise.all([
+  const [fiveKa, off, beauty, pet, upc] = await Promise.all([
+    try5kaByBarcode(code),
     tryOpenFoodFacts(code),
     tryOpenBeautyFacts(code),
     tryOpenPetFoodFacts(code),
     tryUPCitemdb(code),
   ]);
+  if (fiveKa) return fiveKa;
   return bestResult([off, beauty, pet, upc]);
 }

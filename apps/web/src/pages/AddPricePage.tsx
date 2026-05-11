@@ -27,6 +27,7 @@ const SOURCE_LABELS: Record<string, string> = {
   openbeautyfacts: "Open Beauty Facts",
   openpetfoodfacts: "Open Pet Food Facts",
   upcitemdb: "UPC Item DB",
+  "5ka": "Пятёрочка",
 };
 
 export default function AddPricePage() {
@@ -50,6 +51,9 @@ export default function AddPricePage() {
     description?: string | null;
     categoryHint?: string | null;
     source?: string | null;
+    autoPrice?: number | null;
+    autoPricePromo?: number | null;
+    autoPriceStore?: string | null;
   } | null>(null);
 
   // Store price lookup
@@ -115,6 +119,15 @@ export default function AddPricePage() {
       .then((data) => {
         const p = data.product;
         const sourceLabel = SOURCE_LABELS[data.source] ?? data.source;
+        const extra = {
+          quantity: p.quantity,
+          description: p.description,
+          categoryHint: p.categoryHint,
+          source: sourceLabel,
+          autoPrice: p.price ?? null,
+          autoPricePromo: p.pricePromo ?? null,
+          autoPriceStore: p.storeSource ?? null,
+        };
         if (data.source === "local" && p.id) {
           setSelectedProduct({
             id: p.id,
@@ -129,7 +142,7 @@ export default function AddPricePage() {
             createdBy: "",
             createdAt: new Date().toISOString(),
           });
-          setProductExtra({ quantity: p.quantity, description: p.description, categoryHint: p.categoryHint, source: sourceLabel });
+          setProductExtra(extra);
           setStep("store");
           toast({ title: "Товар найден!", description: p.name });
         } else {
@@ -146,9 +159,10 @@ export default function AddPricePage() {
             createdBy: "",
             createdAt: new Date().toISOString(),
           });
-          setProductExtra({ quantity: p.quantity, description: p.description, categoryHint: p.categoryHint, source: sourceLabel });
+          setProductExtra(extra);
           setStep("store");
-          toast({ title: "Товар найден!", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""} (${sourceLabel})` });
+          const priceHint = extra.autoPrice != null ? ` · ${extra.autoPricePromo ?? extra.autoPrice}₽` : "";
+          toast({ title: "Товар найден!", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""} (${sourceLabel})${priceHint}` });
         }
       })
       .catch((err) => {
@@ -243,7 +257,19 @@ export default function AddPricePage() {
   const selectStore = (s: StoreResult) => {
     setSelectedStore(s);
     setNewStoreMode(false);
-    setAiPriceResult(null);
+    if (productExtra?.autoPrice != null) {
+      setAiPriceResult({
+        found: true,
+        price: productExtra.autoPrice,
+        pricePromo: productExtra.autoPricePromo ?? undefined,
+        currency: "RUB",
+        storeDisplayName: productExtra.autoPriceStore ?? "Пятёрочка",
+        searchUrl: `https://5ka.ru/catalog/search/?text=${encodeURIComponent(selectedProduct?.barcode ?? selectedProduct?.name ?? "")}`,
+      });
+      setPrice(String(productExtra.autoPricePromo ?? productExtra.autoPrice));
+    } else {
+      setAiPriceResult(null);
+    }
     setStep("price");
   };
 
@@ -302,6 +328,19 @@ export default function AddPricePage() {
       },
     });
     setNewStoreMode(false);
+    if (productExtra?.autoPrice != null) {
+      setAiPriceResult({
+        found: true,
+        price: productExtra.autoPrice,
+        pricePromo: productExtra.autoPricePromo ?? undefined,
+        currency: "RUB",
+        storeDisplayName: productExtra.autoPriceStore ?? "Пятёрочка",
+        searchUrl: `https://5ka.ru/catalog/search/?text=${encodeURIComponent(selectedProduct?.barcode ?? selectedProduct?.name ?? "")}`,
+      });
+      setPrice(String(productExtra.autoPricePromo ?? productExtra.autoPrice));
+    } else {
+      setAiPriceResult(null);
+    }
     setStep("price");
   };
 
@@ -601,6 +640,16 @@ export default function AddPricePage() {
               <p className="text-xs text-muted-foreground mt-1 line-clamp-3 leading-relaxed">
                 <span className="font-medium">Состав: </span>{productExtra.description}
               </p>
+            )}
+            {productExtra?.autoPrice != null && (
+              <div className="flex items-center gap-1.5 mt-1 pt-1 border-t">
+                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
+                  {productExtra.autoPriceStore}: {productExtra.autoPricePromo ?? productExtra.autoPrice} ₽
+                </span>
+                {productExtra.autoPricePromo != null && (
+                  <span className="text-xs line-through text-muted-foreground">{productExtra.autoPrice} ₽</span>
+                )}
+              </div>
             )}
           </div>
         </div>
