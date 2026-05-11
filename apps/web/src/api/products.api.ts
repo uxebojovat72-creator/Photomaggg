@@ -26,7 +26,16 @@ export const productsApi = {
 
   lookupBarcode: (code: string, storeName?: string) =>
     api.get<{
-      source: "local" | "openfoodfacts" | "openbeautyfacts" | "openpetfoodfacts" | "upcitemdb";
+      source:
+        | "local"
+        | "5ka"
+        | "perekrestok"
+        | "magnit"
+        | "vkusvill"
+        | "barcodelist"
+        | "openbeautyfacts"
+        | "openpetfoodfacts"
+        | "upcitemdb";
       product: {
         name: string;
         brand: string | null;
@@ -35,6 +44,9 @@ export const productsApi = {
         quantity?: string | null;
         description?: string | null;
         categoryHint?: string | null;
+        price?: number | null;
+        pricePromo?: number | null;
+        storeSource?: string | null;
         id?: string;
       };
       storePrice?: {

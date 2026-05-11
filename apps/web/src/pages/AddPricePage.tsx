@@ -23,7 +23,11 @@ const NEW_PRODUCT_ID = "__new__";
 
 const SOURCE_LABELS: Record<string, string> = {
   local: "локальная база",
-  openfoodfacts: "Open Food Facts",
+  "5ka": "Пятёрочка",
+  perekrestok: "Перекрёсток",
+  magnit: "Магнит",
+  vkusvill: "ВкусВилл",
+  barcodelist: "barcode-list.ru",
   openbeautyfacts: "Open Beauty Facts",
   openpetfoodfacts: "Open Pet Food Facts",
   upcitemdb: "UPC Item DB",
@@ -50,6 +54,9 @@ export default function AddPricePage() {
     description?: string | null;
     categoryHint?: string | null;
     source?: string | null;
+    autoPrice?: number | null;
+    autoPricePromo?: number | null;
+    autoPriceStore?: string | null;
   } | null>(null);
 
   // Store price lookup
@@ -115,6 +122,15 @@ export default function AddPricePage() {
       .then((data) => {
         const p = data.product;
         const sourceLabel = SOURCE_LABELS[data.source] ?? data.source;
+        const extra = {
+          quantity: p.quantity,
+          description: p.description,
+          categoryHint: p.categoryHint,
+          source: sourceLabel,
+          autoPrice: p.price ?? null,
+          autoPricePromo: p.pricePromo ?? null,
+          autoPriceStore: p.storeSource ?? null,
+        };
         if (data.source === "local" && p.id) {
           setSelectedProduct({
             id: p.id,
@@ -129,7 +145,7 @@ export default function AddPricePage() {
             createdBy: "",
             createdAt: new Date().toISOString(),
           });
-          setProductExtra({ quantity: p.quantity, description: p.description, categoryHint: p.categoryHint, source: sourceLabel });
+          setProductExtra(extra);
           setStep("store");
           toast({ title: "Товар найден!", description: p.name });
         } else {
@@ -146,9 +162,10 @@ export default function AddPricePage() {
             createdBy: "",
             createdAt: new Date().toISOString(),
           });
-          setProductExtra({ quantity: p.quantity, description: p.description, categoryHint: p.categoryHint, source: sourceLabel });
+          setProductExtra(extra);
           setStep("store");
-          toast({ title: "Товар найден!", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""} (${sourceLabel})` });
+          const priceHint = extra.autoPrice != null ? ` · ${extra.autoPricePromo ?? extra.autoPrice}₽` : "";
+          toast({ title: "Товар найден!", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""} (${sourceLabel})${priceHint}` });
         }
       })
       .catch((err) => {
@@ -240,33 +257,55 @@ export default function AddPricePage() {
     setStep("store");
   };
 
+  const IS_5KA = /пятерочк|пятёрочк|pyaterochka|5ka/i;
+
+  const lookupPriceForStore = async (store: StoreResult, product: typeof selectedProduct, extra: typeof productExtra) => {
+    if (!product) return;
+    // If store is Пятёрочка and we already fetched the price from 5ka during barcode scan → use it instantly
+    if (IS_5KA.test(store.name) && extra?.autoPrice != null) {
+      setAiPriceResult({
+        found: true,
+        price: extra.autoPrice,
+        pricePromo: extra.autoPricePromo ?? undefined,
+        currency: "RUB",
+        storeDisplayName: "Пятёрочка",
+        searchUrl: `https://5ka.ru/catalog/search/?text=${encodeURIComponent(product.barcode ?? product.name ?? "")}`,
+      });
+      setPrice(String(extra.autoPricePromo ?? extra.autoPrice));
+      return;
+    }
+    // Otherwise query the selected store's API
+    setAiPriceLoading(true);
+    setAiPriceResult(null);
+    try {
+      const result = await pricesApi.lookupStorePrice({
+        storeName: store.name,
+        barcode: product.barcode,
+        productName: product.name,
+      });
+      setAiPriceResult(result);
+      if (result.found && result.price != null) {
+        setPrice(String(result.pricePromo ?? result.price));
+        toast({ title: "Цена найдена!", description: `${result.pricePromo ?? result.price} ₽ · ${result.storeDisplayName ?? store.name}` });
+      }
+    } catch {
+      setAiPriceResult({ found: false, currency: "RUB", searchUrl: `https://yandex.ru/search/?text=${encodeURIComponent(`${product.name} ${store.name} цена`)}` });
+    } finally {
+      setAiPriceLoading(false);
+    }
+  };
+
   const selectStore = (s: StoreResult) => {
     setSelectedStore(s);
     setNewStoreMode(false);
     setAiPriceResult(null);
     setStep("price");
+    lookupPriceForStore(s, selectedProduct, productExtra);
   };
 
   const handleAiPriceLookup = async () => {
     if (!selectedStore || !selectedProduct) return;
-    setAiPriceLoading(true);
-    setAiPriceResult(null);
-    try {
-      const result = await pricesApi.lookupStorePrice({
-        storeName: selectedStore.name,
-        barcode: selectedProduct.barcode,
-        productName: selectedProduct.name,
-      });
-      setAiPriceResult(result);
-      if (result.found && result.price != null) {
-        setPrice(String(result.pricePromo ?? result.price));
-        toast({ title: "Цена найдена!", description: `${result.pricePromo ?? result.price} ${result.currency} · ${result.storeDisplayName ?? selectedStore.name}` });
-      }
-    } catch {
-      setAiPriceResult({ found: false, currency: "RUB", searchUrl: `https://yandex.ru/search/?text=${encodeURIComponent(`${selectedProduct.name} ${selectedStore.name} цена`)}` });
-    } finally {
-      setAiPriceLoading(false);
-    }
+    lookupPriceForStore(selectedStore, selectedProduct, productExtra);
   };
 
   const enterNewStoreMode = () => {
@@ -291,7 +330,7 @@ export default function AddPricePage() {
       name: cityName,
       country: { id: "__new__", name: "Russia", code: "RU", flagEmoji: "🇷🇺" },
     };
-    setSelectedStore({
+    const newStore: StoreResult = {
       id: "__new__",
       name: newStoreName.trim(),
       chainName: null,
@@ -300,9 +339,12 @@ export default function AddPricePage() {
         ...cityForStore,
         country: { ...cityForStore.country, flagEmoji: cityForStore.country.flagEmoji ?? "" },
       },
-    });
+    };
+    setSelectedStore(newStore);
     setNewStoreMode(false);
+    setAiPriceResult(null);
     setStep("price");
+    lookupPriceForStore(newStore, selectedProduct, productExtra);
   };
 
   const handlePublish = async () => {
@@ -602,6 +644,16 @@ export default function AddPricePage() {
                 <span className="font-medium">Состав: </span>{productExtra.description}
               </p>
             )}
+            {productExtra?.autoPrice != null && (
+              <div className="flex items-center gap-1.5 mt-1 pt-1 border-t">
+                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
+                  {productExtra.autoPriceStore}: {productExtra.autoPricePromo ?? productExtra.autoPrice} ₽
+                </span>
+                {productExtra.autoPricePromo != null && (
+                  <span className="text-xs line-through text-muted-foreground">{productExtra.autoPrice} ₽</span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -759,11 +811,11 @@ export default function AddPricePage() {
         </div>
       </div>
 
-      {/* Store price lookup */}
-      {!aiPriceResult && !aiPriceLoading && (
+      {/* Store price lookup — auto-triggered when store is selected; button is retry */}
+      {!aiPriceLoading && (
         <Button variant="outline" className="w-full gap-2" onClick={handleAiPriceLookup}>
           <Sparkles className="h-4 w-4 text-primary" />
-          Найти цену на сайте {selectedStore?.name}
+          {aiPriceResult ? `Обновить цену · ${selectedStore?.name}` : `Найти цену на сайте ${selectedStore?.name}`}
         </Button>
       )}
 
