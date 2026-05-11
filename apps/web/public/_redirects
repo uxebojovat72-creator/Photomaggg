@@ -1,2 +1,2 @@
-/api/* /api-missing 404
-/* /index.html 200
+# SPA routing handled via 404.html (copied from index.html during build)
+# No redirect rules needed — Cloudflare Pages serves 404.html for unmatched routes
