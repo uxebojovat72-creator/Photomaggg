@@ -3,81 +3,151 @@ import bcrypt from "bcrypt";
 
 const prisma = new PrismaClient();
 
+const RU_CITIES = [
+  { id: "00000000-0000-0000-0001-000000000001", name: "Москва",          lat: 55.7558,  lon: 37.6173 },
+  { id: "00000000-0000-0000-0001-000000000002", name: "Санкт-Петербург", lat: 59.9311,  lon: 30.3609 },
+  { id: "00000000-0000-0000-0001-000000000003", name: "Новосибирск",     lat: 54.9885,  lon: 82.9207 },
+  { id: "00000000-0000-0000-0001-000000000004", name: "Екатеринбург",    lat: 56.8389,  lon: 60.6057 },
+  { id: "00000000-0000-0000-0001-000000000005", name: "Нижний Новгород", lat: 56.2965,  lon: 43.9361 },
+  { id: "00000000-0000-0000-0001-000000000006", name: "Казань",          lat: 55.8304,  lon: 49.0661 },
+  { id: "00000000-0000-0000-0001-000000000007", name: "Челябинск",       lat: 55.1644,  lon: 61.4368 },
+  { id: "00000000-0000-0000-0001-000000000008", name: "Омск",            lat: 54.9885,  lon: 73.3242 },
+  { id: "00000000-0000-0000-0001-000000000009", name: "Самара",          lat: 53.2415,  lon: 50.2212 },
+  { id: "00000000-0000-0000-0001-000000000010", name: "Ростов-на-Дону",  lat: 47.2357,  lon: 39.7015 },
+  { id: "00000000-0000-0000-0001-000000000011", name: "Уфа",             lat: 54.7388,  lon: 55.9721 },
+  { id: "00000000-0000-0000-0001-000000000012", name: "Красноярск",      lat: 56.0097,  lon: 92.8525 },
+  { id: "00000000-0000-0000-0001-000000000013", name: "Воронеж",         lat: 51.6616,  lon: 39.2003 },
+  { id: "00000000-0000-0000-0001-000000000014", name: "Пермь",           lat: 58.0105,  lon: 56.2502 },
+  { id: "00000000-0000-0000-0001-000000000015", name: "Волгоград",       lat: 48.7080,  lon: 44.5133 },
+  { id: "00000000-0000-0000-0001-000000000016", name: "Краснодар",       lat: 45.0448,  lon: 38.9760 },
+  { id: "00000000-0000-0000-0001-000000000017", name: "Саратов",         lat: 51.5924,  lon: 46.0344 },
+  { id: "00000000-0000-0000-0001-000000000018", name: "Тюмень",          lat: 57.1553,  lon: 65.5619 },
+  { id: "00000000-0000-0000-0001-000000000019", name: "Тольятти",        lat: 53.5303,  lon: 49.3461 },
+  { id: "00000000-0000-0000-0001-000000000020", name: "Ижевск",          lat: 56.8526,  lon: 53.2068 },
+  { id: "00000000-0000-0000-0001-000000000021", name: "Барнаул",         lat: 53.3606,  lon: 83.7636 },
+  { id: "00000000-0000-0000-0001-000000000022", name: "Ульяновск",       lat: 54.3282,  lon: 48.3866 },
+  { id: "00000000-0000-0000-0001-000000000023", name: "Иркутск",         lat: 52.2855,  lon: 104.2890 },
+  { id: "00000000-0000-0000-0001-000000000024", name: "Хабаровск",       lat: 48.4827,  lon: 135.0840 },
+  { id: "00000000-0000-0000-0001-000000000025", name: "Ярославль",       lat: 57.6261,  lon: 39.8845 },
+  { id: "00000000-0000-0000-0001-000000000026", name: "Владивосток",     lat: 43.1332,  lon: 131.9113 },
+  { id: "00000000-0000-0000-0001-000000000027", name: "Махачкала",       lat: 42.9849,  lon: 47.5047 },
+  { id: "00000000-0000-0000-0001-000000000028", name: "Томск",           lat: 56.4846,  lon: 84.9476 },
+  { id: "00000000-0000-0000-0001-000000000029", name: "Оренбург",        lat: 51.7727,  lon: 55.0988 },
+  { id: "00000000-0000-0000-0001-000000000030", name: "Кемерово",        lat: 55.3348,  lon: 86.0883 },
+  { id: "00000000-0000-0000-0001-000000000031", name: "Новокузнецк",     lat: 53.7557,  lon: 87.1099 },
+  { id: "00000000-0000-0000-0001-000000000032", name: "Рязань",          lat: 54.6269,  lon: 39.6916 },
+  { id: "00000000-0000-0000-0001-000000000033", name: "Астрахань",       lat: 46.3497,  lon: 48.0408 },
+  { id: "00000000-0000-0000-0001-000000000034", name: "Набережные Челны",lat: 55.7423,  lon: 52.3959 },
+  { id: "00000000-0000-0000-0001-000000000035", name: "Пенза",           lat: 53.2007,  lon: 44.9971 },
+  { id: "00000000-0000-0000-0001-000000000036", name: "Липецк",          lat: 52.6088,  lon: 39.5994 },
+  { id: "00000000-0000-0000-0001-000000000037", name: "Киров",           lat: 58.6036,  lon: 49.6679 },
+  { id: "00000000-0000-0000-0001-000000000038", name: "Чебоксары",       lat: 56.1439,  lon: 47.2489 },
+  { id: "00000000-0000-0000-0001-000000000039", name: "Тула",            lat: 54.1961,  lon: 37.6182 },
+  { id: "00000000-0000-0000-0001-000000000040", name: "Калининград",     lat: 54.7104,  lon: 20.4522 },
+  { id: "00000000-0000-0000-0001-000000000041", name: "Брянск",          lat: 53.2434,  lon: 34.3637 },
+  { id: "00000000-0000-0000-0001-000000000042", name: "Курск",           lat: 51.7373,  lon: 36.1874 },
+  { id: "00000000-0000-0000-0001-000000000043", name: "Иваново",         lat: 57.0004,  lon: 40.9739 },
+  { id: "00000000-0000-0000-0001-000000000044", name: "Магнитогорск",    lat: 53.3960,  lon: 59.0399 },
+  { id: "00000000-0000-0000-0001-000000000045", name: "Улан-Удэ",        lat: 51.8272,  lon: 107.6065 },
+  { id: "00000000-0000-0000-0001-000000000046", name: "Сочи",            lat: 43.5855,  lon: 39.7231 },
+  { id: "00000000-0000-0000-0001-000000000047", name: "Тверь",           lat: 56.8587,  lon: 35.9176 },
+  { id: "00000000-0000-0000-0001-000000000048", name: "Ставрополь",      lat: 45.0428,  lon: 41.9734 },
+  { id: "00000000-0000-0000-0001-000000000049", name: "Белгород",        lat: 50.5997,  lon: 36.5858 },
+  { id: "00000000-0000-0000-0001-000000000050", name: "Нижний Тагил",    lat: 57.9099,  lon: 59.9799 },
+  { id: "00000000-0000-0000-0001-000000000051", name: "Архангельск",     lat: 64.5401,  lon: 40.5433 },
+  { id: "00000000-0000-0000-0001-000000000052", name: "Смоленск",        lat: 54.7818,  lon: 32.0401 },
+  { id: "00000000-0000-0000-0001-000000000053", name: "Владимир",        lat: 56.1291,  lon: 40.4065 },
+  { id: "00000000-0000-0000-0001-000000000054", name: "Сургут",          lat: 61.2540,  lon: 73.3965 },
+  { id: "00000000-0000-0000-0001-000000000055", name: "Мурманск",        lat: 68.9585,  lon: 33.0827 },
+  { id: "00000000-0000-0000-0001-000000000056", name: "Саранск",         lat: 54.1877,  lon: 45.1840 },
+  { id: "00000000-0000-0000-0001-000000000057", name: "Чита",            lat: 52.0334,  lon: 113.5010 },
+  { id: "00000000-0000-0000-0001-000000000058", name: "Вологда",         lat: 59.2204,  lon: 39.8886 },
+  { id: "00000000-0000-0000-0001-000000000059", name: "Якутск",          lat: 62.0397,  lon: 129.7422 },
+  { id: "00000000-0000-0000-0001-000000000060", name: "Выкса",           lat: 55.3230,  lon: 42.1680 },
+  { id: "00000000-0000-0000-0001-000000000061", name: "Дзержинск",       lat: 56.2340,  lon: 43.4614 },
+  { id: "00000000-0000-0000-0001-000000000062", name: "Орёл",            lat: 52.9651,  lon: 36.0785 },
+  { id: "00000000-0000-0000-0001-000000000063", name: "Калуга",          lat: 54.5293,  lon: 36.2754 },
+  { id: "00000000-0000-0000-0001-000000000064", name: "Чебоксары",       lat: 56.1439,  lon: 47.2489 },
+  { id: "00000000-0000-0000-0001-000000000065", name: "Череповец",       lat: 59.1310,  lon: 37.9087 },
+  { id: "00000000-0000-0000-0001-000000000066", name: "Владикавказ",     lat: 43.0235,  lon: 44.6833 },
+  { id: "00000000-0000-0000-0001-000000000067", name: "Грозный",         lat: 43.3170,  lon: 45.6984 },
+  { id: "00000000-0000-0000-0001-000000000068", name: "Нальчик",         lat: 43.4992,  lon: 43.6168 },
+  { id: "00000000-0000-0000-0001-000000000069", name: "Тамбов",          lat: 52.7212,  lon: 41.4523 },
+  { id: "00000000-0000-0000-0001-000000000070", name: "Мытищи",          lat: 55.9114,  lon: 37.7310 },
+  { id: "00000000-0000-0000-0001-000000000071", name: "Балашиха",        lat: 55.7960,  lon: 37.9600 },
+  { id: "00000000-0000-0000-0001-000000000072", name: "Химки",           lat: 55.8897,  lon: 37.4297 },
+  { id: "00000000-0000-0000-0001-000000000073", name: "Подольск",        lat: 55.4310,  lon: 37.5440 },
+  { id: "00000000-0000-0000-0001-000000000074", name: "Королёв",         lat: 55.9270,  lon: 37.8150 },
+  { id: "00000000-0000-0000-0001-000000000075", name: "Красногорск",     lat: 55.8220,  lon: 37.3360 },
+];
+
+// Major Russian retail chains — one entry per chain (Moscow location)
+const RU_STORE_CHAINS = [
+  { id: "00000000-0000-0000-0002-000000000001", name: "Пятёрочка",     chain: "Пятёрочка" },
+  { id: "00000000-0000-0000-0002-000000000002", name: "Магнит",        chain: "Магнит" },
+  { id: "00000000-0000-0000-0002-000000000003", name: "Перекрёсток",   chain: "Перекрёсток" },
+  { id: "00000000-0000-0000-0002-000000000004", name: "ВкусВилл",      chain: "ВкусВилл" },
+  { id: "00000000-0000-0000-0002-000000000005", name: "Лента",         chain: "Лента" },
+  { id: "00000000-0000-0000-0002-000000000006", name: "Ашан",          chain: "Ашан" },
+  { id: "00000000-0000-0000-0002-000000000007", name: "Metro",         chain: "Metro" },
+  { id: "00000000-0000-0000-0002-000000000008", name: "Дикси",         chain: "Дикси" },
+  { id: "00000000-0000-0000-0002-000000000009", name: "Верный",        chain: "Верный" },
+  { id: "00000000-0000-0000-0002-000000000010", name: "Spar",          chain: "Spar" },
+  { id: "00000000-0000-0000-0002-000000000011", name: "Билла",         chain: "Билла" },
+  { id: "00000000-0000-0000-0002-000000000012", name: "Eurospar",      chain: "Eurospar" },
+  { id: "00000000-0000-0000-0002-000000000013", name: "Глобус",        chain: "Глобус" },
+  { id: "00000000-0000-0000-0002-000000000014", name: "Ярче",          chain: "Ярче" },
+  { id: "00000000-0000-0000-0002-000000000015", name: "Светофор",      chain: "Светофор" },
+  { id: "00000000-0000-0000-0002-000000000016", name: "Самбери",       chain: "Самбери" },
+  { id: "00000000-0000-0000-0002-000000000017", name: "Монетка",       chain: "Монетка" },
+  { id: "00000000-0000-0000-0002-000000000018", name: "Красное&Белое", chain: "Красное&Белое" },
+  { id: "00000000-0000-0000-0002-000000000019", name: "Окей",          chain: "Окей" },
+  { id: "00000000-0000-0000-0002-000000000020", name: "Зельгрос",      chain: "Зельгрос" },
+];
+
 async function main() {
   console.log("Seeding database...");
 
   // Countries
   const countries = await Promise.all([
-    prisma.country.upsert({
-      where: { code: "RU" },
-      update: {},
-      create: { name: "Russia", code: "RU", currencyCode: "RUB", flagEmoji: "🇷🇺" },
-    }),
-    prisma.country.upsert({
-      where: { code: "US" },
-      update: {},
-      create: { name: "United States", code: "US", currencyCode: "USD", flagEmoji: "🇺🇸" },
-    }),
-    prisma.country.upsert({
-      where: { code: "DE" },
-      update: {},
-      create: { name: "Germany", code: "DE", currencyCode: "EUR", flagEmoji: "🇩🇪" },
-    }),
-    prisma.country.upsert({
-      where: { code: "GB" },
-      update: {},
-      create: { name: "United Kingdom", code: "GB", currencyCode: "GBP", flagEmoji: "🇬🇧" },
-    }),
-    prisma.country.upsert({
-      where: { code: "TR" },
-      update: {},
-      create: { name: "Turkey", code: "TR", currencyCode: "TRY", flagEmoji: "🇹🇷" },
-    }),
+    prisma.country.upsert({ where: { code: "RU" }, update: {}, create: { name: "Россия", code: "RU", currencyCode: "RUB", flagEmoji: "🇷🇺" } }),
+    prisma.country.upsert({ where: { code: "US" }, update: {}, create: { name: "United States", code: "US", currencyCode: "USD", flagEmoji: "🇺🇸" } }),
+    prisma.country.upsert({ where: { code: "DE" }, update: {}, create: { name: "Germany", code: "DE", currencyCode: "EUR", flagEmoji: "🇩🇪" } }),
+    prisma.country.upsert({ where: { code: "GB" }, update: {}, create: { name: "United Kingdom", code: "GB", currencyCode: "GBP", flagEmoji: "🇬🇧" } }),
+    prisma.country.upsert({ where: { code: "TR" }, update: {}, create: { name: "Türkiye", code: "TR", currencyCode: "TRY", flagEmoji: "🇹🇷" } }),
+    prisma.country.upsert({ where: { code: "KZ" }, update: {}, create: { name: "Казахстан", code: "KZ", currencyCode: "KZT", flagEmoji: "🇰🇿" } }),
+    prisma.country.upsert({ where: { code: "BY" }, update: {}, create: { name: "Беларусь", code: "BY", currencyCode: "BYN", flagEmoji: "🇧🇾" } }),
   ]);
 
   const russia = countries[0];
 
-  // Cities
-  const moscow = await prisma.city.upsert({
-    where: { id: "00000000-0000-0000-0000-000000000001" },
-    update: {},
-    create: {
-      id: "00000000-0000-0000-0000-000000000001",
-      name: "Moscow",
-      countryId: russia.id,
-      latitude: 55.7558,
-      longitude: 37.6173,
-    },
-  });
+  // Russian cities
+  console.log(`Seeding ${RU_CITIES.length} Russian cities...`);
+  for (const c of RU_CITIES) {
+    await prisma.city.upsert({
+      where: { id: c.id },
+      update: { name: c.name },
+      create: { id: c.id, name: c.name, countryId: russia.id, latitude: c.lat, longitude: c.lon },
+    });
+  }
+
+  const moscow = await prisma.city.findUnique({ where: { id: "00000000-0000-0000-0001-000000000001" } });
+  if (!moscow) throw new Error("Moscow not found after seed");
 
   // Categories
   const foodCat = await prisma.category.upsert({
     where: { id: "00000000-0000-0000-0000-000000000010" },
     update: {},
-    create: { id: "00000000-0000-0000-0000-000000000010", name: "Food & Drinks", iconUrl: null },
+    create: { id: "00000000-0000-0000-0000-000000000010", name: "Продукты и напитки", iconUrl: null },
   });
-
   await Promise.all([
-    prisma.category.upsert({
-      where: { id: "00000000-0000-0000-0000-000000000011" },
-      update: {},
-      create: { id: "00000000-0000-0000-0000-000000000011", name: "Dairy", parentId: foodCat.id },
-    }),
-    prisma.category.upsert({
-      where: { id: "00000000-0000-0000-0000-000000000012" },
-      update: {},
-      create: { id: "00000000-0000-0000-0000-000000000012", name: "Bread & Bakery", parentId: foodCat.id },
-    }),
-    prisma.category.upsert({
-      where: { id: "00000000-0000-0000-0000-000000000020" },
-      update: {},
-      create: { id: "00000000-0000-0000-0000-000000000020", name: "Electronics" },
-    }),
-    prisma.category.upsert({
-      where: { id: "00000000-0000-0000-0000-000000000030" },
-      update: {},
-      create: { id: "00000000-0000-0000-0000-000000000030", name: "Household Goods" },
-    }),
+    prisma.category.upsert({ where: { id: "00000000-0000-0000-0000-000000000011" }, update: {}, create: { id: "00000000-0000-0000-0000-000000000011", name: "Молочные продукты", parentId: foodCat.id } }),
+    prisma.category.upsert({ where: { id: "00000000-0000-0000-0000-000000000012" }, update: {}, create: { id: "00000000-0000-0000-0000-000000000012", name: "Хлеб и выпечка", parentId: foodCat.id } }),
+    prisma.category.upsert({ where: { id: "00000000-0000-0000-0000-000000000013" }, update: {}, create: { id: "00000000-0000-0000-0000-000000000013", name: "Мясо и рыба", parentId: foodCat.id } }),
+    prisma.category.upsert({ where: { id: "00000000-0000-0000-0000-000000000014" }, update: {}, create: { id: "00000000-0000-0000-0000-000000000014", name: "Кондитерские изделия", parentId: foodCat.id } }),
+    prisma.category.upsert({ where: { id: "00000000-0000-0000-0000-000000000020" }, update: {}, create: { id: "00000000-0000-0000-0000-000000000020", name: "Электроника" } }),
+    prisma.category.upsert({ where: { id: "00000000-0000-0000-0000-000000000030" }, update: {}, create: { id: "00000000-0000-0000-0000-000000000030", name: "Бытовые товары" } }),
+    prisma.category.upsert({ where: { id: "00000000-0000-0000-0000-000000000040" }, update: {}, create: { id: "00000000-0000-0000-0000-000000000040", name: "Косметика и гигиена" } }),
   ]);
 
   // Admin user
@@ -85,41 +155,22 @@ async function main() {
   const admin = await prisma.user.upsert({
     where: { email: "admin@priceradar.app" },
     update: {},
-    create: {
-      email: "admin@priceradar.app",
-      passwordHash,
-      displayName: "Admin",
-      role: "admin",
-      trustScore: 100,
-      countryId: russia.id,
-      cityId: moscow.id,
-    },
+    create: { email: "admin@priceradar.app", passwordHash, displayName: "Admin", role: "admin", trustScore: 100, countryId: russia.id, cityId: moscow.id },
   });
 
-  // Demo store
-  await prisma.store.upsert({
-    where: { id: "00000000-0000-0000-0000-000000000100" },
-    update: {},
-    create: {
-      id: "00000000-0000-0000-0000-000000000100",
-      name: "Pyaterochka",
-      chainName: "Пятёрочка",
-      cityId: moscow.id,
-      countryId: russia.id,
-      address: "Tverskaya St, 1",
-      latitude: 55.7597,
-      longitude: 37.6165,
-      createdBy: admin.id,
-      verified: true,
-    },
-  });
+  // Russian store chains (Moscow as base city)
+  console.log(`Seeding ${RU_STORE_CHAINS.length} Russian store chains...`);
+  for (const s of RU_STORE_CHAINS) {
+    await prisma.store.upsert({
+      where: { id: s.id },
+      update: { name: s.name, chainName: s.chain },
+      create: { id: s.id, name: s.name, chainName: s.chain, cityId: moscow.id, countryId: russia.id, createdBy: admin.id, verified: true },
+    });
+  }
 
   console.log("Seeding complete.");
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
+  .catch((e) => { console.error(e); process.exit(1); })
   .finally(() => prisma.$disconnect());
