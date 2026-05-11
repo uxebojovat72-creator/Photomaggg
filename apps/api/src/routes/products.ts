@@ -11,6 +11,8 @@ import {
 } from "../services/product.service.js";
 import { authenticate, optionalAuth } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
+import { lookupBarcodeExternal } from "../services/barcode.service.js";
+import { lookupStorePrice } from "../services/store-price.service.js";
 
 const createProductSchema = z.object({
   name: z.string().min(2).max(200),
@@ -51,70 +53,54 @@ export default async function productRoutes(fastify: FastifyInstance) {
     return reply.send(categories);
   });
 
-  // GET /products/barcode/:code — lookup in DB first, then Open Food Facts
-  fastify.get<{ Params: { code: string } }>(
+  /**
+   * GET /products/barcode/:code?storeName=
+   *
+   * 1. Local DB
+   * 2. All external sources in parallel (OpenFoodFacts, OpenBeautyFacts,
+   *    OpenPetFoodFacts, UPCitemdb) — returns the richest result
+   * 3. If ?storeName= is provided, also runs a store-price lookup and
+   *    includes storePrice in the response.
+   */
+  fastify.get<{
+    Params: { code: string };
+    Querystring: { storeName?: string };
+  }>(
     "/barcode/:code",
     async (req, reply) => {
       const { code } = req.params;
+      const { storeName } = req.query;
+
       if (!/^\d{8,14}$/.test(code)) {
         return reply.code(400).send({ statusCode: 400, error: "Bad Request", message: "Invalid barcode" });
       }
 
-      // 1. Check local DB first
+      // 1. Check local DB
       const local = await prisma.product.findFirst({ where: { barcode: code } });
-      if (local) return reply.send({ source: "local", product: local });
 
-      // 2. Query Open Food Facts (free, no key needed) — prefer Russian data
-      try {
-        const fields = "product_name_ru,product_name,brands,quantity,image_front_url,image_url,ingredients_text_ru,ingredients_text,categories_tags";
-        const res = await fetch(
-          `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${fields}&lc=ru`,
-          { headers: { "User-Agent": "PriceRadar/1.0 (github.com/priceradar)" }, signal: AbortSignal.timeout(9000) }
-        );
-        if (res.ok) {
-          type OFFResponse = {
-            status: number;
-            product?: {
-              product_name_ru?: string;
-              product_name?: string;
-              brands?: string;
-              quantity?: string;
-              image_front_url?: string;
-              image_url?: string;
-              ingredients_text_ru?: string;
-              ingredients_text?: string;
-              categories_tags?: string[];
-            };
-          };
-          const data = (await res.json()) as OFFResponse;
-          if (data.status === 1 && data.product) {
-            const p = data.product;
-            const name = p.product_name_ru || p.product_name || "";
-            if (name) {
-              const rawIngredients = p.ingredients_text_ru || p.ingredients_text || "";
-              const description = rawIngredients.length > 0
-                ? rawIngredients.replace(/_/g, "").substring(0, 300)
-                : null;
-              return reply.send({
-                source: "openfoodfacts",
-                product: {
-                  name: name.trim(),
-                  brand: p.brands?.split(",")[0].trim() ?? null,
-                  barcode: code,
-                  imageUrl: p.image_front_url ?? p.image_url ?? null,
-                  quantity: p.quantity ?? null,
-                  description,
-                  categoryHint: p.categories_tags?.[0]?.replace(/^en:|^ru:/, "") ?? null,
-                },
-              });
-            }
-          }
-        }
-      } catch {
-        // OFF unavailable — return not found
+      if (local) {
+        const base = { source: "local" as const, product: local };
+        if (!storeName) return reply.send(base);
+        const storePrice = await lookupStorePrice({ storeName, barcode: code, productName: local.name });
+        return reply.send({ ...base, storePrice });
       }
 
-      return reply.code(404).send({ statusCode: 404, error: "Not Found", message: "Product not found" });
+      // 2. Query all external sources in parallel
+      const external = await lookupBarcodeExternal(code);
+
+      if (!external) {
+        return reply.code(404).send({ statusCode: 404, error: "Not Found", message: "Штрихкод не найден ни в одной базе данных" });
+      }
+
+      const base = { source: external.source, product: external };
+      if (!storeName) return reply.send(base);
+
+      const storePrice = await lookupStorePrice({
+        storeName,
+        barcode: code,
+        productName: external.name,
+      });
+      return reply.send({ ...base, storePrice });
     }
   );
 

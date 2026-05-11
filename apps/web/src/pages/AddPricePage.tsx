@@ -21,6 +21,14 @@ type CaptureMode = "barcode" | "photo";
 const CURRENCIES = ["USD", "EUR", "RUB", "GBP", "TRY", "CNY", "JPY", "KZT", "AED", "BRL"];
 const NEW_PRODUCT_ID = "__new__";
 
+const SOURCE_LABELS: Record<string, string> = {
+  local: "локальная база",
+  openfoodfacts: "Open Food Facts",
+  openbeautyfacts: "Open Beauty Facts",
+  openpetfoodfacts: "Open Pet Food Facts",
+  upcitemdb: "UPC Item DB",
+};
+
 export default function AddPricePage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,9 +49,10 @@ export default function AddPricePage() {
     quantity?: string | null;
     description?: string | null;
     categoryHint?: string | null;
+    source?: string | null;
   } | null>(null);
 
-  // Store price AI lookup
+  // Store price lookup
   const [aiPriceLoading, setAiPriceLoading] = useState(false);
   const [aiPriceResult, setAiPriceResult] = useState<{
     found: boolean;
@@ -97,7 +106,7 @@ export default function AddPricePage() {
     }
   }, [step, captureMode, startBarcode, stopBarcode]);
 
-  // Handle barcode scan result
+  // Handle barcode scan result — queries 4 databases in parallel
   useEffect(() => {
     if (!barcode.result) return;
     setBarcodeLoading(true);
@@ -105,6 +114,7 @@ export default function AddPricePage() {
     productsApi.lookupBarcode(barcode.result)
       .then((data) => {
         const p = data.product;
+        const sourceLabel = SOURCE_LABELS[data.source] ?? data.source;
         if (data.source === "local" && p.id) {
           setSelectedProduct({
             id: p.id,
@@ -119,11 +129,10 @@ export default function AddPricePage() {
             createdBy: "",
             createdAt: new Date().toISOString(),
           });
-          setProductExtra({ quantity: p.quantity, description: p.description, categoryHint: p.categoryHint });
+          setProductExtra({ quantity: p.quantity, description: p.description, categoryHint: p.categoryHint, source: sourceLabel });
           setStep("store");
           toast({ title: "Товар найден!", description: p.name });
         } else {
-          // Open Food Facts result — auto-select and jump to store step
           setSelectedProduct({
             id: NEW_PRODUCT_ID,
             name: p.name,
@@ -137,16 +146,16 @@ export default function AddPricePage() {
             createdBy: "",
             createdAt: new Date().toISOString(),
           });
-          setProductExtra({ quantity: p.quantity, description: p.description, categoryHint: p.categoryHint });
+          setProductExtra({ quantity: p.quantity, description: p.description, categoryHint: p.categoryHint, source: sourceLabel });
           setStep("store");
-          toast({ title: "Товар найден!", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""}` });
+          toast({ title: "Товар найден!", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""} (${sourceLabel})` });
         }
       })
       .catch((err) => {
         const isNetwork = !err?.response;
         const msg = isNetwork
           ? `Сервер недоступен. Проверьте VITE_API_URL (сейчас: ${import.meta.env.VITE_API_URL ?? "/api"})`
-          : "Товар не найден по штрихкоду";
+          : "Штрихкод не найден ни в одной базе данных";
         setBarcodeApiError(msg);
         startBarcode(); // restart scanner
       })
@@ -251,7 +260,7 @@ export default function AddPricePage() {
       setAiPriceResult(result);
       if (result.found && result.price != null) {
         setPrice(String(result.pricePromo ?? result.price));
-        toast({ title: "Цена найдена!", description: `${result.pricePromo ?? result.price} ${result.currency} на ${result.storeDisplayName ?? selectedStore.name}` });
+        toast({ title: "Цена найдена!", description: `${result.pricePromo ?? result.price} ${result.currency} · ${result.storeDisplayName ?? selectedStore.name}` });
       }
     } catch {
       setAiPriceResult({ found: false, currency: "RUB", searchUrl: `https://yandex.ru/search/?text=${encodeURIComponent(`${selectedProduct.name} ${selectedStore.name} цена`)}` });
@@ -391,7 +400,7 @@ export default function AddPricePage() {
             {barcodeLoading && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/60">
                 <Loader2 className="h-8 w-8 animate-spin text-white" />
-                <span className="text-white ml-2 text-sm">Поиск товара...</span>
+                <span className="text-white ml-2 text-sm">Поиск в 4 базах данных...</span>
               </div>
             )}
           </div>
@@ -546,7 +555,7 @@ export default function AddPricePage() {
         <Button variant="ghost" size="icon" onClick={() => { setNewStoreMode(false); setStep("product"); }}><ArrowLeft className="h-5 w-5" /></Button>
         <div>
           <h1 className="font-bold">{newStoreMode ? "Новый магазин" : "Выбрать магазин"}</h1>
-          <p className="text-xs text-muted-foreground">Шаг 3 из 4</p>
+          <p className="text-xs text-muted-foreground">Шаг 3 из 4 — {selectedProduct?.name}</p>
         </div>
       </div>
 
@@ -573,6 +582,9 @@ export default function AddPricePage() {
               )}
               {selectedProduct.barcode && (
                 <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded-full">{selectedProduct.barcode}</span>
+              )}
+              {productExtra?.source && (
+                <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{productExtra.source}</span>
               )}
             </div>
             {productExtra?.description && (
@@ -625,7 +637,7 @@ export default function AddPricePage() {
             )}
 
             {newStoreCityQ.length >= 2 && newStoreCityResults.length === 0 && !newStoreCity && (
-              <p className="text-xs text-emerald-600 mt-1">Новый город «{newStoreCityQ}» будет создан автоматически</p>
+              <p className="text-xs text-muted-foreground mt-1">Город не найден в базе. Попробуйте по-английски (Moscow, Kazan...)</p>
             )}
 
             {newStoreCity && (
@@ -698,14 +710,13 @@ export default function AddPricePage() {
         </div>
       </div>
 
-      {/* Product info card */}
+      {/* Product summary card */}
       <div className="rounded-xl border bg-card overflow-hidden">
-        {(selectedProduct?.imageUrl || cam.capturedUrl) && (
-          <img
-            src={selectedProduct?.imageUrl ?? cam.capturedUrl ?? ""}
-            alt=""
-            className="w-full h-48 object-contain bg-white border-b"
-          />
+        {selectedProduct?.imageUrl && (
+          <img src={selectedProduct.imageUrl} alt="" className="w-full h-48 object-contain bg-white border-b" />
+        )}
+        {cam.capturedUrl && !selectedProduct?.imageUrl && (
+          <img src={cam.capturedUrl} alt="" className="w-full h-32 object-cover border-b" />
         )}
         <div className="p-3 space-y-1.5">
           <p className="font-bold text-base">{selectedProduct?.name}</p>
@@ -722,6 +733,9 @@ export default function AddPricePage() {
             {selectedProduct?.barcode && (
               <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded-full">{selectedProduct.barcode}</span>
             )}
+            {productExtra?.source && (
+              <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{productExtra.source}</span>
+            )}
           </div>
           {productExtra?.description && (
             <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
@@ -735,7 +749,7 @@ export default function AddPricePage() {
         </div>
       </div>
 
-      {/* AI price lookup */}
+      {/* Store price lookup */}
       {!aiPriceResult && !aiPriceLoading && (
         <Button variant="outline" className="w-full gap-2" onClick={handleAiPriceLookup}>
           <Sparkles className="h-4 w-4 text-primary" />
@@ -764,15 +778,13 @@ export default function AddPricePage() {
                 {aiPriceResult.storeDisplayName} · цена с сайта
               </p>
             </div>
-            <div className="flex gap-2">
-              {aiPriceResult.productUrl && (
-                <a href={aiPriceResult.productUrl} target="_blank" rel="noopener noreferrer">
-                  <Button size="sm" variant="outline" className="gap-1">
-                    <ExternalLink className="h-3 w-3" /> Сайт
-                  </Button>
-                </a>
-              )}
-            </div>
+            {aiPriceResult.productUrl && (
+              <a href={aiPriceResult.productUrl} target="_blank" rel="noopener noreferrer">
+                <Button size="sm" variant="outline" className="gap-1">
+                  <ExternalLink className="h-3 w-3" /> Сайт
+                </Button>
+              </a>
+            )}
           </div>
           {aiPriceResult.productName && (
             <p className="text-xs text-muted-foreground truncate">{aiPriceResult.productName}</p>

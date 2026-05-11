@@ -187,7 +187,7 @@ const MATCHERS: Array<{ re: RegExp; fn: LookupFn }> = [
 
 export async function lookupStorePrice(opts: {
   storeName: string;
-  barcode?: string;
+  barcode?: string | null;
   productName?: string;
 }): Promise<StorePriceResult> {
   const { storeName, barcode, productName } = opts;

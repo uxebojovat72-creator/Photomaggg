@@ -24,9 +24,9 @@ export const productsApi = {
   getCategories: () =>
     api.get("/products/categories").then((r) => r.data),
 
-  lookupBarcode: (code: string) =>
+  lookupBarcode: (code: string, storeName?: string) =>
     api.get<{
-      source: "local" | "openfoodfacts";
+      source: "local" | "openfoodfacts" | "openbeautyfacts" | "openpetfoodfacts" | "upcitemdb";
       product: {
         name: string;
         brand: string | null;
@@ -37,5 +37,15 @@ export const productsApi = {
         categoryHint?: string | null;
         id?: string;
       };
-    }>(`/products/barcode/${code}`).then((r) => r.data),
+      storePrice?: {
+        found: boolean;
+        price?: number;
+        pricePromo?: number;
+        currency: string;
+        productName?: string;
+        storeDisplayName?: string;
+        productUrl?: string;
+        searchUrl: string;
+      };
+    }>(`/products/barcode/${code}`, { params: storeName ? { storeName } : undefined }).then((r) => r.data),
 };
