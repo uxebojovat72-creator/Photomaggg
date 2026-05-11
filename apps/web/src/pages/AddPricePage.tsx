@@ -23,11 +23,15 @@ const NEW_PRODUCT_ID = "__new__";
 
 const SOURCE_LABELS: Record<string, string> = {
   local: "локальная база",
+  "5ka": "Пятёрочка",
+  perekrestok: "Перекрёсток",
+  magnit: "Магнит",
+  vkusvill: "ВкусВилл",
+  barcodelist: "barcode-list.ru",
   openfoodfacts: "Open Food Facts",
   openbeautyfacts: "Open Beauty Facts",
   openpetfoodfacts: "Open Pet Food Facts",
   upcitemdb: "UPC Item DB",
-  "5ka": "Пятёрочка",
 };
 
 export default function AddPricePage() {
