@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Camera, Upload, X, Loader2, CheckCircle, Search, ChevronRight, ArrowLeft, Plus, Barcode } from "lucide-react";
+import { Camera, Upload, X, Loader2, CheckCircle, Search, ChevronRight, ArrowLeft, Plus, Barcode, Sparkles, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,14 @@ type CaptureMode = "barcode" | "photo";
 const CURRENCIES = ["USD", "EUR", "RUB", "GBP", "TRY", "CNY", "JPY", "KZT", "AED", "BRL"];
 const NEW_PRODUCT_ID = "__new__";
 
+const SOURCE_LABELS: Record<string, string> = {
+  local: "база PriceRadar",
+  openfoodfacts: "OpenFoodFacts",
+  openbeautyfacts: "OpenBeautyFacts",
+  openpetfoodfacts: "OpenPetFoodFacts",
+  upcitemdb: "UPCitemdb",
+};
+
 export default function AddPricePage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -37,6 +45,23 @@ export default function AddPricePage() {
   const [aiResult, setAiResult] = useState<AiRecognitionResult | null>(null);
   const [barcodeLoading, setBarcodeLoading] = useState(false);
   const [barcodeApiError, setBarcodeApiError] = useState<string | null>(null);
+  const [productExtra, setProductExtra] = useState<{
+    source?: "local" | "openfoodfacts" | "openbeautyfacts" | "openpetfoodfacts" | "upcitemdb";
+    barcode?: string;
+    imageUrl?: string | null;
+    quantity?: string | null;
+    description?: string | null;
+  } | null>(null);
+  const [aiPriceResult, setAiPriceResult] = useState<{
+    found: boolean;
+    price?: number;
+    pricePromo?: number;
+    currency: string;
+    productName?: string;
+    storeDisplayName?: string;
+    productUrl?: string;
+    searchUrl: string;
+  } | null>(null);
 
   // Product
   const [productQuery, setProductQuery] = useState(prefill?.productName ?? "");
@@ -84,9 +109,18 @@ export default function AddPricePage() {
     if (!barcode.result) return;
     setBarcodeLoading(true);
     setBarcodeApiError(null);
+    setProductExtra(null);
+    setAiPriceResult(null);
     productsApi.lookupBarcode(barcode.result)
       .then((data) => {
         const p = data.product;
+        setProductExtra({
+          source: data.source,
+          barcode: p.barcode,
+          imageUrl: p.imageUrl,
+          quantity: p.quantity,
+          description: p.description,
+        });
         if (data.source === "local" && p.id) {
           setSelectedProduct({
             id: p.id,
@@ -109,7 +143,8 @@ export default function AddPricePage() {
             setAiResult({ name: p.name, brand: p.brand, category: null, confidence: 0.95, provider: "manual" });
           }
           setStep("product");
-          toast({ title: "Штрихкод распознан", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""}` });
+          const src = SOURCE_LABELS[data.source] ?? data.source;
+          toast({ title: `Штрихкод распознан (${src})`, description: `${p.name}${p.brand ? ` · ${p.brand}` : ""}` });
         }
       })
       .catch((err) => {
@@ -140,6 +175,18 @@ export default function AddPricePage() {
     if (debouncedCityQ.length < 2) { setNewStoreCityResults([]); return; }
     geoApi.cities({ q: debouncedCityQ }).then(setNewStoreCityResults).catch(() => {});
   }, [debouncedCityQ]);
+
+  // Auto-lookup store price when entering price step
+  useEffect(() => {
+    if (step !== "price" || !selectedStore || !selectedProduct) return;
+    const barcodeCode = selectedProduct.barcode ?? productExtra?.barcode ?? undefined;
+    setAiPriceResult(null);
+    pricesApi.lookupStorePrice({
+      storeName: selectedStore.name,
+      barcode: barcodeCode ?? null,
+      productName: selectedProduct.name,
+    }).then(setAiPriceResult).catch(() => {});
+  }, [step, selectedStore?.id, selectedProduct?.id]);
 
   const handleCapture = async () => {
     const file = capture();
@@ -324,8 +371,8 @@ export default function AddPricePage() {
                 <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-white rounded-tr" />
                 <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-white rounded-bl" />
                 <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white rounded-br" />
-                {barcode.scanning && (
-                  <div className="absolute left-1 right-1 h-0.5 bg-primary/80 animate-scan-line" style={{ top: "50%" }} />
+                {(barcode.scanning || barcodeLoading) && (
+                  <div className="absolute left-1 right-1 h-0.5 animate-scan-line" style={{ background: "linear-gradient(90deg, transparent, #ef4444, transparent)" }} />
                 )}
               </div>
             </div>
@@ -342,8 +389,11 @@ export default function AddPricePage() {
           </p>
 
           {barcodeApiError && (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-              {barcodeApiError}
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
+              <p className="text-sm text-destructive">{barcodeApiError}</p>
+              <Button size="sm" variant="outline" className="w-full" onClick={() => { setBarcodeApiError(null); startBarcode(); }}>
+                Сканировать снова
+              </Button>
             </div>
           )}
 
@@ -434,11 +484,29 @@ export default function AddPricePage() {
       {aiResult?.name && (
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
           <p className="text-xs text-primary font-medium mb-1">Определено:</p>
-          <p className="font-medium">{aiResult.name}</p>
-          {aiResult.brand && <p className="text-sm text-muted-foreground">{aiResult.brand}</p>}
-          <Badge variant="outline" className="mt-1 text-[10px]">
-            {Math.round(aiResult.confidence * 100)}% уверенность · {aiResult.provider}
-          </Badge>
+          <div className="flex items-start gap-2">
+            {productExtra?.imageUrl && (
+              <img src={productExtra.imageUrl} alt="" className="h-14 w-14 rounded object-cover flex-shrink-0 border" />
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="font-medium">{aiResult.name}</p>
+              {aiResult.brand && <p className="text-sm text-muted-foreground">{aiResult.brand}</p>}
+              {productExtra?.quantity && <p className="text-xs text-muted-foreground">{productExtra.quantity}</p>}
+              <div className="flex flex-wrap gap-1 mt-1">
+                <Badge variant="outline" className="text-[10px]">
+                  {Math.round(aiResult.confidence * 100)}% уверенность · {aiResult.provider}
+                </Badge>
+                {productExtra?.source && (
+                  <Badge variant="secondary" className="text-[10px]">
+                    {SOURCE_LABELS[productExtra.source] ?? productExtra.source}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          </div>
+          {productExtra?.description && (
+            <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{productExtra.description}</p>
+          )}
         </div>
       )}
 
@@ -619,6 +687,49 @@ export default function AddPricePage() {
         )}
       </div>
 
+      {aiPriceResult && (
+        <div className={`rounded-lg border p-3 space-y-1 ${aiPriceResult.found ? "border-emerald-500/40 bg-emerald-500/5" : "border-muted bg-muted/20"}`}>
+          <div className="flex items-center gap-1.5 text-xs font-medium">
+            <Sparkles className="h-3.5 w-3.5 text-emerald-500" />
+            <span className="text-emerald-600 dark:text-emerald-400">
+              {aiPriceResult.found ? `Цена в ${aiPriceResult.storeDisplayName ?? selectedStore?.name}` : `Цена не найдена в ${selectedStore?.name}`}
+            </span>
+          </div>
+          {aiPriceResult.found && (
+            <div className="flex items-baseline gap-2">
+              <span className="text-lg font-bold">{aiPriceResult.price} {aiPriceResult.currency}</span>
+              {aiPriceResult.pricePromo && (
+                <span className="text-sm text-emerald-600 font-medium">
+                  {aiPriceResult.pricePromo} {aiPriceResult.currency} (акция)
+                </span>
+              )}
+            </div>
+          )}
+          {aiPriceResult.productName && (
+            <p className="text-xs text-muted-foreground">{aiPriceResult.productName}</p>
+          )}
+          <a
+            href={aiPriceResult.productUrl ?? aiPriceResult.searchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {aiPriceResult.found ? "Открыть в магазине" : "Поиск в магазине"}
+          </a>
+          {aiPriceResult.found && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="w-full mt-1 text-xs h-7"
+              onClick={() => { setPrice(String(aiPriceResult.pricePromo ?? aiPriceResult.price ?? "")); setCurrency(aiPriceResult.currency); }}
+            >
+              Использовать эту цену
+            </Button>
+          )}
+        </div>
+      )}
+
       <div className="space-y-2">
         <label className="text-sm font-medium">Цена</label>
         <div className="flex gap-2">
@@ -667,6 +778,9 @@ export default function AddPricePage() {
           setProductQuery("");
           setStoreQuery("");
           setNewStoreMode(false);
+          setProductExtra(null);
+          setAiPriceResult(null);
+          setBarcodeApiError(null);
         }}>
           Добавить ещё
         </Button>

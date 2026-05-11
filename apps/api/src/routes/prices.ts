@@ -11,6 +11,7 @@ import {
   getModerationQueue,
   moderatePrice,
 } from "../services/price.service.js";
+import { lookupStorePrice } from "../services/store-price.service.js";
 import { authenticate, optionalAuth, requireModerator } from "../middleware/auth.js";
 
 const createPriceSchema = z.object({
@@ -37,6 +38,18 @@ const createPriceSchema = z.object({
 const ACCEPTED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export default async function priceRoutes(fastify: FastifyInstance) {
+  // GET /prices/store-lookup?storeName=&barcode=&productName=
+  fastify.get<{
+    Querystring: { storeName: string; barcode?: string; productName?: string };
+  }>("/store-lookup", async (req, reply) => {
+    const { storeName, barcode, productName } = req.query;
+    if (!storeName) {
+      return reply.code(400).send({ message: "storeName is required" });
+    }
+    const result = await lookupStorePrice({ storeName, barcode, productName });
+    return reply.send(result);
+  });
+
   // GET /prices/feed
   fastify.get<{
     Querystring: {
@@ -148,7 +161,7 @@ export default async function priceRoutes(fastify: FastifyInstance) {
     return reply.code(201).send(report);
   });
 
-  // ─── Moderation ─────────────────────────────────────────────────────────────
+  // ─── Moderation ───────────────────────────────────────────────────────────────────────────
 
   // GET /prices/moderation/queue
   fastify.get<{ Querystring: { page?: string; limit?: string } }>(
