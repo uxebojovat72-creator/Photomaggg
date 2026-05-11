@@ -10,11 +10,10 @@
  *   • OpenBeautyFacts — cosmetics
  *   • OpenPetFoodFacts— pet food
  *   • UPCitemdb       — Western barcodes
+ *   • OpenFoodFacts   — LAST RESORT (garbled names fixed by Groq Vision)
  *
- * OpenFoodFacts is excluded — gives garbled OCR names for Russian products.
- *
- * If the best result still has a garbled name and an image URL, Groq Vision
- * reads the label from the photo and returns the correct name.
+ * Russian store APIs may be blocked on datacenter IPs — OFF is the safety net.
+ * When OFF returns a garbled name + has image → Groq Vision reads the real label.
  */
 
 import { env } from "../lib/env.js";
@@ -37,6 +36,7 @@ export interface BarcodeProduct {
     | "magnit"
     | "vkusvill"
     | "barcodelist"
+    | "openfoodfacts"
     | "openbeautyfacts"
     | "openpetfoodfacts"
     | "upcitemdb";
@@ -325,6 +325,47 @@ async function tryBarcodeList(code: string): Promise<BarcodeProduct | null> {
   }
 }
 
+// ─── OpenFoodFacts (last resort — names often garbled, fixed by Groq Vision) ──
+
+const OFF_FIELDS =
+  "product_name_ru,product_name,brands,quantity,image_front_url,image_url,ingredients_text_ru,ingredients_text,categories_tags";
+
+async function tryOpenFoodFacts(code: string): Promise<BarcodeProduct | null> {
+  try {
+    const res = await fetch(
+      `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${OFF_FIELDS}&lc=ru`,
+      { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8000) }
+    );
+    if (!res.ok) return null;
+    type R = {
+      status: number;
+      product?: {
+        product_name_ru?: string; product_name?: string; brands?: string;
+        quantity?: string; image_front_url?: string; image_url?: string;
+        ingredients_text_ru?: string; ingredients_text?: string; categories_tags?: string[];
+      };
+    };
+    const data = (await res.json()) as R;
+    if (data.status !== 1 || !data.product) return null;
+    const p = data.product;
+    const name = p.product_name_ru || p.product_name || "";
+    if (!name) return null;
+    const rawIng = p.ingredients_text_ru || p.ingredients_text || "";
+    return {
+      name: name.trim(),
+      brand: p.brands?.split(",")[0].trim() ?? null,
+      barcode: code,
+      imageUrl: p.image_front_url ?? p.image_url ?? null,
+      quantity: p.quantity ?? null,
+      description: rawIng ? rawIng.replace(/_/g, "").substring(0, 300) : null,
+      categoryHint: p.categories_tags?.[0]?.replace(/^en:|^ru:/, "") ?? null,
+      source: "openfoodfacts",
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ─── OpenBeautyFacts ──────────────────────────────────────────────────────────
 
 async function tryOpenBeautyFacts(code: string): Promise<BarcodeProduct | null> {
@@ -472,13 +513,12 @@ function bestResult(results: (BarcodeProduct | null)[]): BarcodeProduct | null {
 
 /**
  * Query all external barcode sources in parallel and return the best result.
- * Russian store APIs (5ka, Перекрёсток, Магнит, ВкусВилл) take priority.
- * OpenFoodFacts is excluded — gives garbled OCR names for Russian products.
- * If the best result still has a garbled name and an image URL, Groq Vision
- * reads the label from the photo and returns the correct name.
+ * Priority: RU stores → barcode-list.ru → beauty/pet/UPC → OpenFoodFacts (AI-cleaned)
+ * Russian store APIs may be blocked on datacenter IPs — OFF is the safety net.
+ * When any source returns a garbled name + has image → Groq Vision reads the real label.
  */
 export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduct | null> {
-  const [fiveKa, perek, magnit, vkusvill, barcodeList, beauty, pet, upc] =
+  const [fiveKa, perek, magnit, vkusvill, barcodeList, beauty, pet, upc, off] =
     await Promise.all([
       try5ka(code),
       tryPerekrestok(code),
@@ -488,23 +528,31 @@ export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduc
       tryOpenBeautyFacts(code),
       tryOpenPetFoodFacts(code),
       tryUPCitemdb(code),
+      tryOpenFoodFacts(code),   // last resort — always AI-cleaned below
     ]);
 
-  // Russian store results — pick the best among those that responded
-  const ruStore = bestResult([fiveKa, perek, magnit, vkusvill]);
+  // Helper: return result after optional AI name cleanup
+  async function withCleanup(r: BarcodeProduct): Promise<BarcodeProduct> {
+    if (isGarbledName(r.name) && r.imageUrl) {
+      const { name: cleanName, brand: aiBrand } = await cleanNameWithGroq(r.imageUrl, r.name);
+      return { ...r, name: cleanName, brand: r.brand ?? aiBrand };
+    }
+    return r;
+  }
 
+  // 1. Russian store APIs (best: proper RU names + prices)
+  const ruStore = bestResult([fiveKa, perek, magnit, vkusvill]);
   if (ruStore) {
-    // If the store result has no image, try to get one from beauty/pet/upc
     if (!ruStore.imageUrl) {
-      const withImg = bestResult([beauty, pet, upc, barcodeList]);
+      const withImg = bestResult([beauty, pet, upc, off]);
       if (withImg?.imageUrl) ruStore.imageUrl = withImg.imageUrl;
     }
     return ruStore;
   }
 
-  // barcode-list.ru — reliable Russian name, merge image from other sources if available
+  // 2. barcode-list.ru — reliable Russian name, merge image if available
   if (barcodeList) {
-    const withImage = bestResult([beauty, pet, upc]);
+    const withImage = bestResult([beauty, pet, upc, off]);
     if (withImage?.imageUrl) {
       return {
         ...barcodeList,
@@ -517,18 +565,19 @@ export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduc
     return barcodeList;
   }
 
-  // Fallback: cosmetics / pet food / Western barcodes
-  const result = bestResult([beauty, pet, upc]);
-  if (!result) return null;
+  // 3. Beauty / pet food / Western barcodes — clean if garbled
+  const globalResult = bestResult([beauty, pet, upc]);
+  if (globalResult) return withCleanup(globalResult);
 
-  // AI name cleanup: if still garbled and we have an image, ask Groq to read the label
-  if (isGarbledName(result.name) && result.imageUrl) {
-    const { name: cleanName, brand: aiBrand } = await cleanNameWithGroq(
-      result.imageUrl,
-      result.name
-    );
-    return { ...result, name: cleanName, brand: result.brand ?? aiBrand };
+  // 4. OpenFoodFacts — last resort, ALWAYS run AI cleanup on the name
+  if (off) {
+    if (off.imageUrl) {
+      // Always clean — OFF names for Russian products are almost always garbled
+      const { name: cleanName, brand: aiBrand } = await cleanNameWithGroq(off.imageUrl, off.name);
+      return { ...off, name: cleanName, brand: off.brand ?? aiBrand };
+    }
+    return off; // no image → can't AI-clean, return raw (better than nothing)
   }
 
-  return result;
+  return null;
 }
