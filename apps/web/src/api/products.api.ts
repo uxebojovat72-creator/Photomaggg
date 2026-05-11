@@ -33,6 +33,7 @@ export const productsApi = {
         | "magnit"
         | "vkusvill"
         | "barcodelist"
+        | "openfoodfacts"
         | "openbeautyfacts"
         | "openpetfoodfacts"
         | "upcitemdb";
