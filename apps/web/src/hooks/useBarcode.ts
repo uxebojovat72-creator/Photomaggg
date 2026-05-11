@@ -28,8 +28,21 @@ export function useBarcode(videoRef: React.RefObject<HTMLVideoElement | null>) {
         setState({ scanning: false, result: null, error: "Камера не найдена" });
         return;
       }
-      // Prefer back camera
+      // Prefer back/rear camera
       const device = devices.find((d) => /back|rear|environment/i.test(d.label)) ?? devices[devices.length - 1];
+
+      // Request high-res stream for better barcode readability
+      if (videoRef.current && videoRef.current.srcObject === null) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: device.deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          });
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        } catch {
+          // Fallback to default — zxing will open its own stream
+        }
+      }
 
       const controls = await reader.decodeFromVideoDevice(
         device.deviceId,
@@ -40,9 +53,9 @@ export function useBarcode(videoRef: React.RefObject<HTMLVideoElement | null>) {
             controlsRef.current = null;
             setState({ scanning: false, result: result.getText(), error: null });
           } else if (err) {
-            // NotFoundException is thrown continuously while scanning — ignore it
-            if (!err.message?.includes("No MultiFormat")) {
-              console.warn("[Barcode]", err.message);
+            const msg = err.message ?? "";
+            if (!msg.includes("No MultiFormat") && !msg.includes("NotFoundException")) {
+              console.warn("[Barcode]", msg);
             }
           }
         }
@@ -50,7 +63,7 @@ export function useBarcode(videoRef: React.RefObject<HTMLVideoElement | null>) {
       controlsRef.current = controls;
     } catch (err) {
       console.error("[Barcode] start error:", err);
-      setState({ scanning: false, result: null, error: "Ошибка доступа к камере" });
+      setState({ scanning: false, result: null, error: "Ошибка доступа к камере. Разрешите доступ и нажмите «Повторить»" });
     }
   }, [videoRef]);
 

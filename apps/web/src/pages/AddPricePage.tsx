@@ -387,20 +387,25 @@ export default function AddPricePage() {
             />
             {/* Scanning overlay */}
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="relative w-56 h-36">
-                <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-white rounded-tl" />
-                <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-white rounded-tr" />
-                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-white rounded-bl" />
-                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-white rounded-br" />
-                {barcode.scanning && (
-                  <div className="absolute left-1 right-1 h-0.5 bg-primary/80 animate-scan-line" style={{ top: "50%" }} />
+              <div className="relative w-64 h-40">
+                {/* Corner brackets */}
+                <div className="absolute top-0 left-0 w-8 h-8 border-t-3 border-l-3 border-white rounded-tl" style={{ borderWidth: "3px" }} />
+                <div className="absolute top-0 right-0 w-8 h-8 border-t-3 border-r-3 border-white rounded-tr" style={{ borderWidth: "3px" }} />
+                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-3 border-l-3 border-white rounded-bl" style={{ borderWidth: "3px" }} />
+                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-3 border-r-3 border-white rounded-br" style={{ borderWidth: "3px" }} />
+                {/* Animated scan line — always visible while camera is open */}
+                {(barcode.scanning || barcodeLoading) && (
+                  <div
+                    className="absolute left-0 right-0 h-0.5 animate-scan-line"
+                    style={{ background: "linear-gradient(90deg, transparent, #f00 20%, #f00 80%, transparent)", boxShadow: "0 0 6px 2px rgba(255,0,0,0.6)" }}
+                  />
                 )}
               </div>
             </div>
             {barcodeLoading && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/60">
                 <Loader2 className="h-8 w-8 animate-spin text-white" />
-                <span className="text-white ml-2 text-sm">Поиск в 4 базах данных...</span>
+                <span className="text-white ml-2 text-sm font-medium">Поиск в 4 базах данных...</span>
               </div>
             )}
           </div>
@@ -410,13 +415,18 @@ export default function AddPricePage() {
           </p>
 
           {barcodeApiError && (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-              {barcodeApiError}
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive space-y-2">
+              <p>{barcodeApiError}</p>
+              <Button size="sm" className="w-full" onClick={() => { setBarcodeApiError(null); startBarcode(); }}>
+                Сканировать снова
+              </Button>
             </div>
           )}
 
-          {barcode.error && (
-            <Button className="w-full" onClick={startBarcode}>Повторить</Button>
+          {barcode.error && !barcodeApiError && (
+            <Button className="w-full" onClick={() => { setBarcodeApiError(null); startBarcode(); }}>
+              Повторить
+            </Button>
           )}
 
           <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("product")}>

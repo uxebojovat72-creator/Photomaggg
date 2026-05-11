@@ -5,6 +5,91 @@ import tesseract from "node-tesseract-ocr";
 import sharp from "sharp";
 import { env } from "../lib/env.js";
 
+// ─── Groq Vision (llama-3.2-11b-vision — 7000 req/day free) ──────────────────
+
+async function recognizeWithGroq(imageBuffer: Buffer): Promise<AiResult | null> {
+  if (!env.GROQ_API_KEY) return null;
+
+  let compressed: Buffer;
+  try {
+    compressed = await sharp(imageBuffer)
+      .resize(896, 896, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 88 })
+      .toBuffer();
+  } catch {
+    compressed = imageBuffer;
+  }
+
+  const base64 = compressed.toString("base64");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.GROQ_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "meta-llama/llama-4-scout-17b-16e-instruct",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: `data:image/jpeg;base64,${base64}` },
+              },
+              {
+                type: "text",
+                text: 'Это фото товара или ценника. Определи название товара и бренд. Ответь ТОЛЬКО JSON без пояснений: {"name":"точное название с объёмом/весом если видно","brand":"бренд или null","category":"food/drink/household/electronics/cosmetics/other или null","confidence":0.0}',
+              },
+            ],
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 200,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const err = await res.text().catch(() => "");
+      console.error(`[Groq] HTTP ${res.status}:`, err.slice(0, 200));
+      return null;
+    }
+
+    type GroqResponse = { choices?: Array<{ message?: { content?: string } }> };
+    const data = (await res.json()) as GroqResponse;
+    const text = data.choices?.[0]?.message?.content?.trim();
+    if (!text) return null;
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    type Parsed = { name?: string; brand?: string | null; category?: string | null; confidence?: number };
+    const parsed = JSON.parse(jsonMatch[0]) as Parsed;
+    if (typeof parsed.name !== "string" || !parsed.name.trim()) return null;
+
+    console.log("[Groq] recognized:", parsed.name);
+    return {
+      name: parsed.name.trim(),
+      brand: parsed.brand ?? null,
+      category: parsed.category ?? null,
+      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.9,
+      provider: "gemini", // reuse existing provider type label
+    };
+  } catch (err) {
+    if ((err as Error).name !== "AbortError") {
+      console.error("[Groq] error:", err instanceof Error ? err.message : err);
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export interface AiResult {
   name: string;
   brand: string | null;
@@ -187,6 +272,7 @@ export async function recognizeProduct(imageBuffer: Buffer): Promise<AiResult> {
   const imageBase64 = imageBuffer.toString("base64");
 
   const result =
+    (await recognizeWithGroq(imageBuffer)) ??
     (await recognizeWithCloudflare(imageBuffer)) ??
     (await recognizeWithGemini(imageBase64)) ??
     (await recognizeWithTesseract(imageBuffer));
