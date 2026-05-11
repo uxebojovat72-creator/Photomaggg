@@ -20,5 +20,10 @@
     "eslint": "^8.57.0",
     "turbo": "^2.0.0",
     "typescript": "^5.4.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "0.21.5"
+    }
   }
 }
