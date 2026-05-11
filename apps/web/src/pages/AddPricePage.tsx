@@ -151,9 +151,11 @@ export default function AddPricePage() {
         const isNetwork = !err?.response;
         const msg = isNetwork
           ? `Сервер недоступен. Проверьте VITE_API_URL (сейчас: ${import.meta.env.VITE_API_URL ?? "/api"})`
-          : "Товар не найден по штрихкоду";
+          : err?.response?.status === 400
+            ? "Не распознан как штрихкод товара"
+            : "Товар не найден по штрихкоду";
         setBarcodeApiError(msg);
-        startBarcode(); // restart scanner
+        setTimeout(startBarcode, 500); // restart scanner after short delay
       })
       .finally(() => setBarcodeLoading(false));
   }, [barcode.result, startBarcode]);
@@ -377,21 +379,28 @@ export default function AddPricePage() {
               </div>
             </div>
             {barcodeLoading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60 flex-col gap-2">
                 <Loader2 className="h-8 w-8 animate-spin text-white" />
-                <span className="text-white ml-2 text-sm">Поиск товара...</span>
+                <span className="text-white text-sm">Поиск товара...</span>
+                {barcode.result && (
+                  <span className="text-white/60 text-xs font-mono">{barcode.result}</span>
+                )}
               </div>
             )}
           </div>
 
           <p className="text-center text-sm text-muted-foreground">
-            {barcode.scanning ? "Наведите камеру на штрихкод" : barcode.error ?? "Запуск камеры..."}
+            {barcodeLoading
+              ? `Штрихкод: ${barcode.result}`
+              : barcode.scanning
+                ? "Наведите камеру на штрихкод"
+                : barcode.error ?? "Запуск камеры..."}
           </p>
 
           {barcodeApiError && (
             <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
               <p className="text-sm text-destructive">{barcodeApiError}</p>
-              <Button size="sm" variant="outline" className="w-full" onClick={() => { setBarcodeApiError(null); startBarcode(); }}>
+              <Button size="sm" variant="outline" className="w-full" onClick={() => { setBarcodeApiError(null); stopBarcode(); setTimeout(startBarcode, 300); }}>
                 Сканировать снова
               </Button>
             </div>
