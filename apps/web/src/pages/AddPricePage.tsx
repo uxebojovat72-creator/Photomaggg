@@ -28,10 +28,10 @@ const SOURCE_LABELS: Record<string, string> = {
   magnit: "Магнит",
   vkusvill: "ВкусВилл",
   barcodelist: "barcode-list.ru",
-  openfoodfacts: "Open Food Facts",
   openbeautyfacts: "Open Beauty Facts",
   openpetfoodfacts: "Open Pet Food Facts",
   upcitemdb: "UPC Item DB",
+  ai: "Groq AI",
 };
 
 export default function AddPricePage() {
