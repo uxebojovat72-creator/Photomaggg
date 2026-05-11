@@ -45,6 +45,7 @@ export default function AddPricePage() {
   const [aiResult, setAiResult] = useState<AiRecognitionResult | null>(null);
   const [barcodeLoading, setBarcodeLoading] = useState(false);
   const [barcodeApiError, setBarcodeApiError] = useState<string | null>(null);
+  const [scannedCode, setScannedCode] = useState<string | null>(null);
   const [productExtra, setProductExtra] = useState<{
     source?: "local" | "openfoodfacts" | "openbeautyfacts" | "openpetfoodfacts" | "upcitemdb";
     barcode?: string;
@@ -151,9 +152,12 @@ export default function AddPricePage() {
         const isNetwork = !err?.response;
         const msg = isNetwork
           ? `Сервер недоступен. Проверьте VITE_API_URL (сейчас: ${import.meta.env.VITE_API_URL ?? "/api"})`
-          : "Товар не найден по штрихкоду";
+          : err?.response?.status === 400
+            ? "Не распознан как штрихкод товара"
+            : "Товар не найден по штрихкоду";
+        setScannedCode(barcode.result);
         setBarcodeApiError(msg);
-        startBarcode(); // restart scanner
+        setTimeout(startBarcode, 500);
       })
       .finally(() => setBarcodeLoading(false));
   }, [barcode.result, startBarcode]);
@@ -391,7 +395,15 @@ export default function AddPricePage() {
           {barcodeApiError && (
             <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
               <p className="text-sm text-destructive">{barcodeApiError}</p>
-              <Button size="sm" variant="outline" className="w-full" onClick={() => { setBarcodeApiError(null); startBarcode(); }}>
+              {scannedCode && <p className="text-xs text-muted-foreground font-mono text-center">{scannedCode}</p>}
+              <Button size="sm" variant="secondary" className="w-full gap-1.5" onClick={() => {
+                setBarcodeApiError(null);
+                stopBarcode();
+                setStep("product");
+              }}>
+                <Plus className="h-3.5 w-3.5" /> Ввести товар вручную
+              </Button>
+              <Button size="sm" variant="outline" className="w-full" onClick={() => { setBarcodeApiError(null); stopBarcode(); setTimeout(startBarcode, 300); }}>
                 Сканировать снова
               </Button>
             </div>
@@ -600,7 +612,19 @@ export default function AddPricePage() {
             )}
 
             {newStoreCityQ.length >= 2 && newStoreCityResults.length === 0 && !newStoreCity && (
-              <p className="text-xs text-muted-foreground mt-1">Город не найден в базе. Попробуйте по-английски (Moscow, Kazan...)</p>
+              <div className="mt-1 space-y-1">
+                <p className="text-xs text-muted-foreground">Не найден в базе. Попробуйте по-английски или:</p>
+                <button
+                  className="text-xs text-primary underline-offset-2 hover:underline"
+                  onClick={() => setNewStoreCity({
+                    id: "__custom__",
+                    name: newStoreCityQ.trim(),
+                    country: { id: "__custom__", code: "RU", name: "Россия", flagEmoji: "🇷🇺" },
+                  })}
+                >
+                  Использовать «{newStoreCityQ.trim()}» как название города
+                </button>
+              </div>
             )}
 
             {newStoreCity && (
@@ -781,6 +805,7 @@ export default function AddPricePage() {
           setProductExtra(null);
           setAiPriceResult(null);
           setBarcodeApiError(null);
+          setScannedCode(null);
         }}>
           Добавить ещё
         </Button>
