@@ -34,7 +34,7 @@ export async function getRates(): Promise<RatesMap> {
 
 export async function fetchAndStore(): Promise<RatesMap> {
   try {
-    const res = await fetch(`${env.EXCHANGE_RATE_API_URL}?base=USD`);
+    const res = await fetch(env.EXCHANGE_RATE_API_URL);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     type ApiResponse = { base: string; rates: Record<string, number>; date: string };

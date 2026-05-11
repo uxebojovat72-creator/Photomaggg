@@ -22,4 +22,16 @@ export const pricesApi = {
       headers: { "Content-Type": "multipart/form-data" },
     }).then((r) => r.data);
   },
+
+  lookupStorePrice: (params: { storeName: string; barcode?: string | null; productName?: string }) =>
+    api.get<{
+      found: boolean;
+      price?: number;
+      pricePromo?: number;
+      currency: string;
+      productName?: string;
+      storeDisplayName?: string;
+      productUrl?: string;
+      searchUrl: string;
+    }>("/prices/store-lookup", { params }).then((r) => r.data),
 };

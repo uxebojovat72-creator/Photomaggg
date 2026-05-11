@@ -37,7 +37,8 @@ export const env = {
   SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY ?? "",
   SUPABASE_STORAGE_BUCKET: process.env.SUPABASE_STORAGE_BUCKET ?? "photos",
 
-  EXCHANGE_RATE_API_URL: process.env.EXCHANGE_RATE_API_URL ?? "https://api.exchangerate.host/latest",
+  GROQ_API_KEY: process.env.GROQ_API_KEY ?? "",
+  EXCHANGE_RATE_API_URL: process.env.EXCHANGE_RATE_API_URL ?? "https://api.exchangerate-api.com/v4/latest/USD",
 
   VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY ?? "",
   VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY ?? "",
