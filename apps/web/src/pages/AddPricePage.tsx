@@ -94,7 +94,6 @@ export default function AddPricePage() {
   const debouncedSQ = useDebounce(storeQuery, 300);
   const debouncedCityQ = useDebounce(newStoreCityQ, 300);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const priceFileInputRef = useRef<HTMLInputElement>(null);
 
   // Auth guard
@@ -147,16 +146,6 @@ export default function AddPricePage() {
     setProductPhotoUrl(URL.createObjectURL(file));
     resetCam();
     runProductAI(file);
-  };
-
-  const handleProductFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setProductPhotoFile(file);
-    setProductPhotoUrl(URL.createObjectURL(file));
-    resetCam();
-    runProductAI(file);
-    e.target.value = "";
   };
 
   const runProductAI = async (file: File) => {
@@ -454,21 +443,16 @@ export default function AddPricePage() {
         ) : (
           <div className="aspect-[4/3] flex flex-col items-center justify-center gap-3 text-muted-foreground p-6">
             <Camera className="h-10 w-10 opacity-30" />
-            <p className="text-sm text-center">Сфотографируйте товар<br />или загрузите фото из галереи</p>
+            <p className="text-sm text-center">Сфотографируйте этикетку товара</p>
             {cam.error && <p className="text-xs text-destructive">{cam.error}</p>}
           </div>
         )}
       </div>
 
-      {!productPhotoUrl && (
-        <div className="grid grid-cols-2 gap-3">
-          <Button className="gap-2" onClick={startCamera} disabled={cam.isActive}>
-            <Camera className="h-4 w-4" /> Камера
-          </Button>
-          <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="h-4 w-4" /> Галерея
-          </Button>
-        </div>
+      {!productPhotoUrl && !cam.isActive && (
+        <Button className="w-full gap-2" onClick={startCamera}>
+          <Camera className="h-4 w-4" /> Открыть камеру
+        </Button>
       )}
 
       {!productLoading && (
@@ -488,7 +472,6 @@ export default function AddPricePage() {
         </div>
       )}
 
-      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleProductFileUpload} />
     </div>
   );
 
