@@ -5,178 +5,121 @@ import tesseract from "node-tesseract-ocr";
 import sharp from "sharp";
 import { env } from "../lib/env.js";
 
-// ─── Groq Vision (llama-3.2-11b-vision — 7000 req/day free) ──────────────────
+// ─── Provider health tracker ──────────────────────────────────────────────────
+// If a provider returns 429/403 (quota/rate-limit), it's skipped for BACKOFF_MS.
+// After backoff it's retried automatically — no manual intervention needed.
 
-async function recognizeWithGroq(imageBuffer: Buffer): Promise<AiResult | null> {
-  if (!env.GROQ_API_KEY) return null;
+type Provider = "groq" | "gemini";
 
-  let compressed: Buffer;
+const health: Record<Provider, { failedAt: number; failures: number }> = {
+  groq: { failedAt: 0, failures: 0 },
+  gemini: { failedAt: 0, failures: 0 },
+};
+
+const BACKOFF_MS = 10 * 60 * 1000; // 10 min cooldown after quota hit
+
+function isAvailable(p: Provider): boolean {
+  if (health[p].failures === 0) return true;
+  if (Date.now() - health[p].failedAt > BACKOFF_MS) {
+    health[p].failures = 0; // auto-recover after backoff
+    return true;
+  }
+  return false;
+}
+
+function markFailed(p: Provider, httpStatus?: number): void {
+  health[p].failedAt = Date.now();
+  health[p].failures++;
+  console.warn(`[AI] ${p} unavailable — HTTP ${httpStatus ?? "error"} (failures: ${health[p].failures}, retry in ${BACKOFF_MS / 60000}m)`);
+}
+
+function markOk(p: Provider): void {
+  if (health[p].failures > 0) {
+    console.log(`[AI] ${p} recovered ✓`);
+    health[p].failures = 0;
+  }
+}
+
+export function getProviderStatus(): Record<Provider, { available: boolean; failures: number; recoversIn?: number }> {
+  const now = Date.now();
+  return {
+    groq: {
+      available: isAvailable("groq"),
+      failures: health.groq.failures,
+      recoversIn: health.groq.failures > 0 ? Math.max(0, Math.ceil((health.groq.failedAt + BACKOFF_MS - now) / 1000)) : undefined,
+    },
+    gemini: {
+      available: isAvailable("gemini"),
+      failures: health.gemini.failures,
+      recoversIn: health.gemini.failures > 0 ? Math.max(0, Math.ceil((health.gemini.failedAt + BACKOFF_MS - now) / 1000)) : undefined,
+    },
+  };
+}
+
+// ─── Unified image compression ────────────────────────────────────────────────
+
+async function compressImage(buf: Buffer, maxPx = 896, quality = 88): Promise<Buffer> {
   try {
-    compressed = await sharp(imageBuffer)
-      .resize(896, 896, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 88 })
+    return await sharp(buf)
+      .resize(maxPx, maxPx, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality })
       .toBuffer();
   } catch {
-    compressed = imageBuffer;
+    return buf;
   }
+}
 
-  const base64 = compressed.toString("base64");
+// ─── Core API callers ─────────────────────────────────────────────────────────
+
+async function callGroq(base64: string, prompt: string, maxTokens = 300): Promise<string | null> {
+  if (!env.GROQ_API_KEY || !isAvailable("groq")) return null;
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timer = setTimeout(() => controller.abort(), 25000);
 
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${env.GROQ_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "meta-llama/llama-4-scout-17b-16e-instruct",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image_url",
-                image_url: { url: `data:image/jpeg;base64,${base64}` },
-              },
-              {
-                type: "text",
-                text: 'Это фото товара или ценника. Определи название товара и бренд. Ответь ТОЛЬКО JSON без пояснений: {"name":"точное название с объёмом/весом если видно","brand":"бренд или null","category":"food/drink/household/electronics/cosmetics/other или null","confidence":0.0}',
-              },
-            ],
-          },
-        ],
+        messages: [{ role: "user", content: [
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } },
+          { type: "text", text: prompt },
+        ]}],
         temperature: 0.1,
-        max_tokens: 200,
+        max_tokens: maxTokens,
       }),
       signal: controller.signal,
     });
 
     if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      console.error(`[Groq] HTTP ${res.status}:`, err.slice(0, 200));
+      markFailed("groq", res.status);
+      const body = await res.text().catch(() => "");
+      console.error(`[Groq] HTTP ${res.status}:`, body.slice(0, 150));
       return null;
     }
 
-    type GroqResponse = { choices?: Array<{ message?: { content?: string } }> };
-    const data = (await res.json()) as GroqResponse;
-    const text = data.choices?.[0]?.message?.content?.trim();
-    if (!text) return null;
-
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    type Parsed = { name?: string; brand?: string | null; category?: string | null; confidence?: number };
-    const parsed = JSON.parse(jsonMatch[0]) as Parsed;
-    if (typeof parsed.name !== "string" || !parsed.name.trim()) return null;
-
-    console.log("[Groq] recognized:", parsed.name);
-    return {
-      name: parsed.name.trim(),
-      brand: parsed.brand ?? null,
-      category: parsed.category ?? null,
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.9,
-      provider: "gemini", // reuse existing provider type label
-    };
-  } catch (err) {
-    if ((err as Error).name !== "AbortError") {
-      console.error("[Groq] error:", err instanceof Error ? err.message : err);
+    type R = { choices?: Array<{ message?: { content?: string } }> };
+    const data = (await res.json()) as R;
+    const text = data.choices?.[0]?.message?.content?.trim() ?? null;
+    if (text) markOk("groq");
+    return text;
+  } catch (e) {
+    if ((e as Error).name !== "AbortError") {
+      console.error("[Groq] network error:", (e as Error).message);
     }
     return null;
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
   }
 }
 
-export interface AiResult {
-  name: string;
-  brand: string | null;
-  category: string | null;
-  confidence: number;
-  provider: "ollama" | "tesseract" | "cloudflare" | "gemini" | "huggingface" | "google_vision" | "manual";
-}
-
-// ─── Cloudflare Workers AI ────────────────────────────────────────────────────
-// uform-gen2-qwen-500m — vision model, free with Cloudflare account
-
-async function recognizeWithCloudflare(imageBuffer: Buffer): Promise<AiResult | null> {
-  if (!env.CLOUDFLARE_AI_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) return null;
-
-  // Resize to 896px (optimal for uform-gen2) and convert to JPEG ~150-200 KB
-  let compressed: Buffer;
-  try {
-    compressed = await sharp(imageBuffer)
-      .resize(896, 896, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 88 })
-      .toBuffer();
-  } catch {
-    compressed = imageBuffer;
-  }
-
-  const imageBytes = Array.from(new Uint8Array(compressed));
+async function callGemini(base64: string, prompt: string, maxTokens = 300): Promise<string | null> {
+  if (!env.GEMINI_API_KEY || !isAvailable("gemini")) return null;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-
-  try {
-    const res = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/unum/uform-gen2-qwen-500m`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.CLOUDFLARE_AI_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          image: imageBytes,
-          prompt:
-            "This is a product photo. What is the exact product name and brand? " +
-            "Include size/volume if visible. Reply with the product name only, nothing else.",
-        }),
-        signal: controller.signal,
-      }
-    );
-
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      console.error(`[Cloudflare] HTTP ${res.status}:`, err.slice(0, 200));
-      return null;
-    }
-
-    type CfResponse = { result?: { description?: string; response?: string }; success?: boolean };
-    const data = (await res.json()) as CfResponse;
-    const text = (data.result?.description ?? data.result?.response ?? "").trim();
-    if (!text || text.length < 2) return null;
-
-    const clean = text
-      .replace(/^(ASSISTANT:|assistant:|User:|user:)\s*/i, "")
-      .split("\n")[0]
-      .trim();
-
-    if (clean.length >= 2 && clean.length <= 150) {
-      console.log("[Cloudflare] recognized:", clean);
-      return { name: clean, brand: null, category: null, confidence: 0.75, provider: "cloudflare" };
-    }
-    return null;
-  } catch (err) {
-    if ((err as Error).name !== "AbortError") {
-      console.error("[Cloudflare] error:", err instanceof Error ? err.message : err);
-    }
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-// ─── Gemini Flash (fallback if key available) ─────────────────────────────────
-
-async function recognizeWithGemini(imageBase64: string): Promise<AiResult | null> {
-  if (!env.GEMINI_API_KEY) return null;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
     const res = await fetch(
@@ -186,43 +129,184 @@ async function recognizeWithGemini(imageBase64: string): Promise<AiResult | null
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [
-            { text: `Это фото товара. Найди название товара и бренд. Ответь ТОЛЬКО JSON: {"name":"название с объёмом/весом","brand":"бренд или null","category":"food/drink/household/electronics/other или null","confidence":0.0}` },
-            { inline_data: { mime_type: "image/jpeg", data: imageBase64 } },
+            { text: prompt },
+            { inline_data: { mime_type: "image/jpeg", data: base64 } },
           ]}],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 200 },
+          generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens },
         }),
         signal: controller.signal,
       }
     );
-    if (!res.ok) return null;
 
-    type GeminiResponse = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-    const data = (await res.json()) as GeminiResponse;
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!text) return null;
+    if (!res.ok) {
+      markFailed("gemini", res.status);
+      const body = await res.text().catch(() => "");
+      console.error(`[Gemini] HTTP ${res.status}:`, body.slice(0, 150));
+      return null;
+    }
 
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    type ParsedResult = { name?: string; brand?: string | null; category?: string | null; confidence?: number };
-    const parsed = JSON.parse(jsonMatch[0]) as ParsedResult;
-    if (typeof parsed.name !== "string" || !parsed.name) return null;
-
-    console.log("[Gemini] recognized:", parsed.name);
-    return {
-      name: parsed.name, brand: parsed.brand ?? null,
-      category: parsed.category ?? null,
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.9,
-      provider: "gemini",
-    };
-  } catch {
+    type R = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const data = (await res.json()) as R;
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+    if (text) markOk("gemini");
+    return text;
+  } catch (e) {
+    if ((e as Error).name !== "AbortError") {
+      console.error("[Gemini] network error:", (e as Error).message);
+    }
     return null;
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
   }
 }
 
-// ─── Tesseract (last resort — works for clean labels with dark text) ──────────
+// Try Groq first, Gemini as fallback (or reversed if Groq is in backoff)
+async function callBestProvider(
+  base64: string,
+  prompt: string,
+  maxTokens = 300
+): Promise<{ text: string; provider: Provider } | null> {
+  const groqOk = isAvailable("groq") && !!env.GROQ_API_KEY;
+  const geminiOk = isAvailable("gemini") && !!env.GEMINI_API_KEY;
+
+  // Determine order: prefer Groq (7000 req/day), fallback Gemini (1500 req/day)
+  const order: Provider[] = groqOk ? ["groq", "gemini"] : ["gemini", "groq"];
+
+  for (const p of order) {
+    const text = p === "groq"
+      ? await callGroq(base64, prompt, maxTokens)
+      : await callGemini(base64, prompt, maxTokens);
+    if (text) {
+      console.log(`[AI] ✓ ${p} handled request`);
+      return { text, provider: p };
+    }
+  }
+
+  // Both failed
+  if (groqOk || geminiOk) {
+    console.error("[AI] Both Groq and Gemini failed for this request");
+  } else {
+    console.warn("[AI] No vision API keys configured");
+  }
+  return null;
+}
+
+// ─── Parse JSON from LLM response ────────────────────────────────────────────
+
+function parseJson<T>(text: string): T | null {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try { return JSON.parse(m[0]) as T; } catch { return null; }
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface AiResult {
+  name: string;
+  brand: string | null;
+  category: string | null;
+  confidence: number;
+  provider: "groq" | "gemini" | "tesseract" | "cloudflare" | "manual";
+}
+
+export interface ReceiptItem {
+  name: string;
+  brand: string | null;
+  price: number;
+}
+
+// ─── Product recognition ──────────────────────────────────────────────────────
+
+const PRODUCT_PROMPT =
+  'Это фото товара или ценника. Определи название товара и бренд. ' +
+  'Ответь ТОЛЬКО JSON без пояснений: {"name":"точное название с объёмом/весом если видно","brand":"бренд или null","category":"food/drink/household/electronics/cosmetics/other или null","confidence":0.0}';
+
+export async function recognizeProduct(imageBuffer: Buffer): Promise<AiResult> {
+  const compressed = await compressImage(imageBuffer, 896);
+  const base64 = compressed.toString("base64");
+
+  const result = await callBestProvider(base64, PRODUCT_PROMPT, 200);
+
+  if (result) {
+    type P = { name?: string; brand?: string | null; category?: string | null; confidence?: number };
+    const parsed = parseJson<P>(result.text);
+    if (parsed && typeof parsed.name === "string" && parsed.name.trim()) {
+      return {
+        name: parsed.name.trim(),
+        brand: parsed.brand ?? null,
+        category: parsed.category ?? null,
+        confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.9,
+        provider: result.provider,
+      };
+    }
+  }
+
+  // Tesseract fallback
+  const ocr = await recognizeWithTesseract(imageBuffer);
+  if (ocr) return ocr;
+
+  return { name: "", brand: null, category: null, confidence: 0, provider: "manual" };
+}
+
+// ─── Price tag recognition ────────────────────────────────────────────────────
+
+const PRICE_PROMPT =
+  'Это фото ценника в магазине. Найди цену товара. ' +
+  'Ответь ТОЛЬКО JSON: {"price": 99.99, "currency": "RUB"}. ' +
+  'Если цена не видна — {"price": null, "currency": "RUB"}';
+
+export async function recognizePriceTag(imageBuffer: Buffer): Promise<{ price: number | null; currency: string }> {
+  const compressed = await compressImage(imageBuffer, 896);
+  const base64 = compressed.toString("base64");
+
+  const result = await callBestProvider(base64, PRICE_PROMPT, 100);
+
+  if (result) {
+    type P = { price?: number | null; currency?: string };
+    const parsed = parseJson<P>(result.text);
+    if (parsed && typeof parsed.price === "number" && parsed.price > 0) {
+      console.log(`[${result.provider} Price]`, parsed.price);
+      return { price: parsed.price, currency: parsed.currency ?? "RUB" };
+    }
+  }
+
+  return { price: null, currency: "RUB" };
+}
+
+// ─── Receipt (чек) recognition ────────────────────────────────────────────────
+
+const RECEIPT_PROMPT =
+  "Это фото кассового чека из магазина. Извлеки список всех купленных товаров с ценами. " +
+  'Ответь ТОЛЬКО JSON без пояснений: {"storeName":"название магазина или null","items":[{"name":"название товара","brand":"бренд или null","price":99.99}]}. ' +
+  "Включай только отдельные товары с финальной ценой. Не включай итоги, скидки, налоги, бонусы, сдачу.";
+
+export async function recognizeReceipt(
+  imageBuffer: Buffer
+): Promise<{ items: ReceiptItem[]; storeName: string | null }> {
+  // Receipts need higher resolution for small text
+  const compressed = await compressImage(imageBuffer, 1400, 92);
+  const base64 = compressed.toString("base64");
+
+  const result = await callBestProvider(base64, RECEIPT_PROMPT, 3000);
+
+  if (result) {
+    type P = { storeName?: string | null; items?: Array<{ name?: string; brand?: string | null; price?: number }> };
+    const parsed = parseJson<P>(result.text);
+    if (parsed && Array.isArray(parsed.items)) {
+      const items: ReceiptItem[] = parsed.items
+        .filter((i) => i.name && typeof i.price === "number" && i.price > 0)
+        .map((i) => ({ name: String(i.name!).trim(), brand: i.brand ?? null, price: Number(i.price) }));
+      if (items.length > 0) {
+        console.log(`[${result.provider} Receipt] ${items.length} items, store: ${parsed.storeName ?? "?"}`);
+        return { items, storeName: parsed.storeName ?? null };
+      }
+    }
+  }
+
+  return { items: [], storeName: null };
+}
+
+// ─── Tesseract OCR (last resort for product labels) ───────────────────────────
 
 export async function recognizeWithTesseract(imageBuffer: Buffer): Promise<AiResult | null> {
   const tmpPath = join(tmpdir(), `ocr_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
@@ -241,17 +325,18 @@ export async function recognizeWithTesseract(imageBuffer: Buffer): Promise<AiRes
       .filter((l) => {
         if (l.length < 4) return false;
         if (!/[а-яА-ЯёЁa-zA-Z]{2,}/.test(l)) return false;
-        const words = l.split(/\s+/);
-        return words.some((w) => w.length >= 3);
+        return l.split(/\s+/).some((w) => w.length >= 3);
       });
 
     if (lines.length === 0) return null;
 
-    const scored = lines.map((l) => {
-      const cyr = (l.match(/[а-яА-ЯёЁ]/g) ?? []).length;
-      const lat = (l.match(/[a-zA-Z]/g) ?? []).length;
-      return { line: l, score: l.length * ((cyr + lat) / l.length) * (cyr > 0 ? 1.3 : 1) };
-    }).sort((a, b) => b.score - a.score);
+    const scored = lines
+      .map((l) => {
+        const cyr = (l.match(/[а-яА-ЯёЁ]/g) ?? []).length;
+        const lat = (l.match(/[a-zA-Z]/g) ?? []).length;
+        return { line: l, score: l.length * ((cyr + lat) / l.length) * (cyr > 0 ? 1.3 : 1) };
+      })
+      .sort((a, b) => b.score - a.score);
 
     const name = scored[0].line.replace(/[|\\/<>{}[\]@#$%^*=~"'`]/g, "").trim();
     if (name.length < 3) return null;
@@ -264,235 +349,4 @@ export async function recognizeWithTesseract(imageBuffer: Buffer): Promise<AiRes
   } finally {
     await unlink(tmpPath).catch(() => {});
   }
-}
-
-// ─── Receipt (чек) recognition ───────────────────────────────────────────────
-
-export interface ReceiptItem {
-  name: string;
-  brand: string | null;
-  price: number;
-}
-
-export async function recognizeReceipt(
-  imageBuffer: Buffer
-): Promise<{ items: ReceiptItem[]; storeName: string | null }> {
-  let compressed: Buffer;
-  try {
-    compressed = await sharp(imageBuffer)
-      .resize(1400, 2000, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 92 })
-      .toBuffer();
-  } catch {
-    compressed = imageBuffer;
-  }
-  const base64 = compressed.toString("base64");
-
-  const prompt =
-    "Это фото кассового чека из магазина. Извлеки список всех купленных товаров с ценами. " +
-    'Ответь ТОЛЬКО JSON без пояснений: {"storeName":"название магазина или null","items":[{"name":"название товара","brand":"бренд или null","price":99.99}]}. ' +
-    "Включай только отдельные товары с финальной ценой. Не включай итоги, скидки, налоги, бонусы, сдачу.";
-
-  if (env.GROQ_API_KEY) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 40000);
-    try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${env.GROQ_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "meta-llama/llama-4-scout-17b-16e-instruct",
-          messages: [{ role: "user", content: [
-            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } },
-            { type: "text", text: prompt },
-          ]}],
-          temperature: 0.1,
-          max_tokens: 3000,
-        }),
-        signal: controller.signal,
-      });
-      if (res.ok) {
-        type GR = { choices?: Array<{ message?: { content?: string } }> };
-        const data = (await res.json()) as GR;
-        const text = data.choices?.[0]?.message?.content?.trim();
-        if (text) {
-          const m = text.match(/\{[\s\S]*\}/);
-          if (m) {
-            type P = { storeName?: string | null; items?: Array<{ name?: string; brand?: string | null; price?: number }> };
-            const parsed = JSON.parse(m[0]) as P;
-            if (Array.isArray(parsed.items)) {
-              const items: ReceiptItem[] = parsed.items
-                .filter((i) => i.name && typeof i.price === "number" && i.price > 0)
-                .map((i) => ({ name: String(i.name).trim(), brand: i.brand ?? null, price: Number(i.price) }));
-              if (items.length > 0) {
-                console.log(`[Groq Receipt] ${items.length} items, store: ${parsed.storeName ?? "?"}`);
-                return { items, storeName: parsed.storeName ?? null };
-              }
-            }
-          }
-        }
-      }
-    } catch (err) {
-      if ((err as Error).name !== "AbortError") console.error("[Groq Receipt] error:", err);
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  if (env.GEMINI_API_KEY) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${env.GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [
-              { text: prompt },
-              { inline_data: { mime_type: "image/jpeg", data: base64 } },
-            ]}],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 3000 },
-          }),
-          signal: controller.signal,
-        }
-      );
-      if (res.ok) {
-        type GemR = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-        const data = (await res.json()) as GemR;
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (text) {
-          const m = text.match(/\{[\s\S]*\}/);
-          if (m) {
-            type P = { storeName?: string | null; items?: Array<{ name?: string; brand?: string | null; price?: number }> };
-            const parsed = JSON.parse(m[0]) as P;
-            if (Array.isArray(parsed.items)) {
-              const items: ReceiptItem[] = parsed.items
-                .filter((i) => i.name && typeof i.price === "number" && i.price > 0)
-                .map((i) => ({ name: String(i.name).trim(), brand: i.brand ?? null, price: Number(i.price) }));
-              if (items.length > 0) {
-                console.log(`[Gemini Receipt] ${items.length} items`);
-                return { items, storeName: parsed.storeName ?? null };
-              }
-            }
-          }
-        }
-      }
-    } catch { /* fall through */ } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  return { items: [], storeName: null };
-}
-
-// ─── Price tag recognition ────────────────────────────────────────────────────
-
-export async function recognizePriceTag(imageBuffer: Buffer): Promise<{ price: number | null; currency: string }> {
-  let compressed: Buffer;
-  try {
-    compressed = await sharp(imageBuffer)
-      .resize(896, 896, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 88 })
-      .toBuffer();
-  } catch {
-    compressed = imageBuffer;
-  }
-  const base64 = compressed.toString("base64");
-
-  if (env.GROQ_API_KEY) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${env.GROQ_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "meta-llama/llama-4-scout-17b-16e-instruct",
-          messages: [{ role: "user", content: [
-            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } },
-            { type: "text", text: 'Это фото ценника в магазине. Найди цену товара. Ответь ТОЛЬКО JSON: {"price": 99.99, "currency": "RUB"}. Если цена не видна — {"price": null, "currency": "RUB"}' },
-          ]}],
-          temperature: 0.1,
-          max_tokens: 100,
-        }),
-        signal: controller.signal,
-      });
-      if (res.ok) {
-        type GR = { choices?: Array<{ message?: { content?: string } }> };
-        const data = (await res.json()) as GR;
-        const text = data.choices?.[0]?.message?.content?.trim();
-        if (text) {
-          const m = text.match(/\{[\s\S]*\}/);
-          if (m) {
-            type P = { price?: number | null; currency?: string };
-            const p = JSON.parse(m[0]) as P;
-            if (typeof p.price === "number" && p.price > 0) {
-              console.log("[Groq Price]", p.price);
-              return { price: p.price, currency: p.currency ?? "RUB" };
-            }
-          }
-        }
-      }
-    } catch { /* fall through */ } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  if (env.GEMINI_API_KEY) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${env.GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [
-              { text: 'Это фото ценника. Найди цену. ТОЛЬКО JSON: {"price": 99.99, "currency": "RUB"}. Нет цены — {"price": null, "currency": "RUB"}' },
-              { inline_data: { mime_type: "image/jpeg", data: base64 } },
-            ]}],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 100 },
-          }),
-          signal: controller.signal,
-        }
-      );
-      if (res.ok) {
-        type GemR = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-        const data = (await res.json()) as GemR;
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (text) {
-          const m = text.match(/\{[\s\S]*\}/);
-          if (m) {
-            type P = { price?: number | null; currency?: string };
-            const p = JSON.parse(m[0]) as P;
-            if (typeof p.price === "number" && p.price > 0) {
-              console.log("[Gemini Price]", p.price);
-              return { price: p.price, currency: p.currency ?? "RUB" };
-            }
-          }
-        }
-      }
-    } catch { /* fall through */ } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  return { price: null, currency: "RUB" };
-}
-
-// ─── Main: Cloudflare → Gemini → Tesseract → manual ─────────────────────────
-
-export async function recognizeProduct(imageBuffer: Buffer): Promise<AiResult> {
-  const imageBase64 = imageBuffer.toString("base64");
-
-  const result =
-    (await recognizeWithGroq(imageBuffer)) ??
-    (await recognizeWithCloudflare(imageBuffer)) ??
-    (await recognizeWithGemini(imageBase64)) ??
-    (await recognizeWithTesseract(imageBuffer));
-
-  return result ?? { name: "", brand: null, category: null, confidence: 0, provider: "manual" };
 }
