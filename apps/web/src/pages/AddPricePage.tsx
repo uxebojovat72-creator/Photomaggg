@@ -31,7 +31,7 @@ const SOURCE_LABELS: Record<string, string> = {
   openbeautyfacts: "Open Beauty Facts",
   openpetfoodfacts: "Open Pet Food Facts",
   upcitemdb: "UPC Item DB",
-  ai: "Groq AI",
+  ai: "Google (AI)",
 };
 
 export default function AddPricePage() {
