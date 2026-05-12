@@ -218,7 +218,8 @@ export interface ReceiptItem {
 // ─── Product recognition ──────────────────────────────────────────────────────
 
 const PRODUCT_PROMPT =
-  'Это фото товара или ценника. Определи название товара и бренд. ' +
+  'Это фото товара или ценника. Определи название ТОЛЬКО если на фото ВИДНА этикетка, упаковка или надпись с названием. ' +
+  'Если предмет без видимой этикетки или надписей — верни {"name":"","brand":null,"category":null,"confidence":0.0}. ' +
   'Ответь ТОЛЬКО JSON без пояснений: {"name":"точное название с объёмом/весом если видно","brand":"бренд или null","category":"food/drink/household/electronics/cosmetics/other или null","confidence":0.0}';
 
 export async function recognizeProduct(imageBuffer: Buffer): Promise<AiResult> {

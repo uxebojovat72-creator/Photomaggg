@@ -58,14 +58,21 @@ export default function ReceiptScanPage() {
 
   useEffect(() => () => stopCamera(), [stopCamera]);
 
+  // Connect stream after video element mounts (camActive flip triggers re-render first)
+  useEffect(() => {
+    if (camActive && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [camActive]);
+
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 2560 } },
       });
       streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
-      setCamActive(true);
+      setCamActive(true); // triggers useEffect above to wire srcObject after render
     } catch {
       setError("Камера недоступна. Загрузите фото.");
     }
