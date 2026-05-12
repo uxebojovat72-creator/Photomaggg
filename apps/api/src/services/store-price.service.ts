@@ -1,3 +1,5 @@
+import { env } from "../lib/env.js";
+
 export interface StorePriceResult {
   found: boolean;
   price?: number;
@@ -185,6 +187,57 @@ const MATCHERS: Array<{ re: RegExp; fn: LookupFn }> = [
   { re: /лента|lenta/i, fn: lookupLenta },
 ];
 
+async function findPriceWithGemini(query: string, storeName: string): Promise<StorePriceResult | null> {
+  if (!env.GEMINI_API_KEY) return null;
+  const yandexUrl = `https://yandex.ru/search/?text=${encodeURIComponent(`${query} ${storeName} цена`)}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text:
+            `Найди АКТУАЛЬНУЮ цену товара "${query}" в магазине "${storeName}" в России.\n` +
+            `Верни ТОЛЬКО JSON без пояснений:\n` +
+            `{"found":true,"price":число,"pricePromo":число_или_null,"currency":"RUB","productName":"название"}\n` +
+            `Если цена не найдена — {"found":false}`,
+          }] }],
+          tools: [{ "google_search": {} }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 200 },
+        }),
+        signal: controller.signal,
+      }
+    );
+    if (!res.ok) return null;
+    type GR = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const data = (await res.json()) as GR;
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (!text) return null;
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    type P = { found?: boolean; price?: number; pricePromo?: number | null; currency?: string; productName?: string };
+    const p = JSON.parse(m[0]) as P;
+    if (!p.found || typeof p.price !== "number") return null;
+    console.log(`[Gemini Price] "${query}" в ${storeName} → ${p.price}₽`);
+    return {
+      found: true,
+      price: p.price,
+      pricePromo: p.pricePromo ?? undefined,
+      currency: p.currency ?? "RUB",
+      productName: p.productName,
+      storeDisplayName: storeName,
+      searchUrl: yandexUrl,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function lookupStorePrice(opts: {
   storeName: string;
   barcode?: string | null;
@@ -194,12 +247,16 @@ export async function lookupStorePrice(opts: {
   const query = barcode ?? productName ?? storeName;
   const yandexUrl = `https://yandex.ru/search/?text=${encodeURIComponent(`${productName ?? barcode} ${storeName} цена`)}`;
 
+  // 1. Try store-specific API
   const match = MATCHERS.find(m => m.re.test(storeName));
   if (match) {
     const result = await match.fn(query);
-    if (!result.found) result.searchUrl = yandexUrl;
-    return result;
+    if (result.found) return result;
   }
+
+  // 2. Fallback: Gemini searches Google for current price
+  const gemini = await findPriceWithGemini(productName ?? query, storeName);
+  if (gemini) return gemini;
 
   return { found: false, currency: "RUB", searchUrl: yandexUrl };
 }
