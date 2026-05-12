@@ -3,13 +3,15 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
-import { ArrowLeft, Star, TrendingDown, TrendingUp, MapPin, Store } from "lucide-react";
+import { ArrowLeft, Heart, TrendingDown, MapPin, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { productsApi } from "@/api/products.api";
+import { favoritesApi } from "@/api/favorites.api";
 import { formatPrice, formatRelativeDate } from "@priceradar/shared";
 import type { Price } from "@priceradar/shared";
+import { useAuthStore } from "@/store/auth.store";
 
 type Days = 7 | 30 | 90;
 
@@ -42,10 +44,13 @@ function fmtPrice(price: number, currency = "RUB") {
 export default function ProductPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuthStore();
   const [product, setProduct] = useState<ProductWithPrices | null>(null);
   const [history, setHistory] = useState<PricePoint[]>([]);
   const [days, setDays] = useState<Days>(30);
   const [loading, setLoading] = useState(true);
+  const [isFav, setIsFav] = useState(false);
+  const [favLoading, setFavLoading] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -60,6 +65,27 @@ export default function ProductPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [id, days]);
+
+  useEffect(() => {
+    if (!id || !user) return;
+    favoritesApi.check(id).then((r) => setIsFav(r.isFavorite)).catch(() => {});
+  }, [id, user]);
+
+  const toggleFavorite = async () => {
+    if (!user) { navigate("/login"); return; }
+    setFavLoading(true);
+    try {
+      if (isFav) {
+        await favoritesApi.remove(id!);
+        setIsFav(false);
+      } else {
+        await favoritesApi.add(id!);
+        setIsFav(true);
+      }
+    } finally {
+      setFavLoading(false);
+    }
+  };
 
   if (loading) return (
     <div className="max-w-2xl mx-auto px-4 py-4 space-y-4">
@@ -102,6 +128,15 @@ export default function ProductPage() {
             {product.category && <Badge variant="secondary" className="text-xs">{product.category.name}</Badge>}
           </div>
         </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={toggleFavorite}
+          disabled={favLoading}
+          title={isFav ? "Убрать из избранного" : "Добавить в избранное"}
+        >
+          <Heart className={`h-5 w-5 transition-colors ${isFav ? "fill-red-500 text-red-500" : "text-muted-foreground"}`} />
+        </Button>
         {product.imageUrl && (
           <img src={product.imageUrl} alt={product.name} className="h-16 w-16 rounded-lg object-cover flex-shrink-0" />
         )}

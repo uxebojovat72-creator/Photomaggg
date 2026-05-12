@@ -1,12 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { Home, Search, PlusCircle, BarChart2, User } from "lucide-react";
+import { Home, Search, PlusCircle, Heart, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { to: "/", icon: Home, label: "Главная" },
   { to: "/search", icon: Search, label: "Поиск" },
   { to: "/add-price", icon: PlusCircle, label: "Добавить", primary: true },
-  { to: "/analytics", icon: BarChart2, label: "Аналитика" },
+  { to: "/favorites", icon: Heart, label: "Избранное" },
   { to: "/profile", icon: User, label: "Профиль" },
 ];
 

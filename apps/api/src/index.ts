@@ -16,6 +16,7 @@ import priceRoutes from "./routes/prices.js";
 import storeRoutes from "./routes/stores.js";
 import aiRoutes from "./routes/ai.js";
 import currencyRoutes from "./routes/currencies.js";
+import favoritesRoutes from "./routes/favorites.js";
 
 import { env } from "./lib/env.js";
 import { prisma } from "./lib/prisma.js";
@@ -72,6 +73,7 @@ await fastify.register(priceRoutes, { prefix: "/prices" });
 await fastify.register(storeRoutes, { prefix: "/stores" });
 await fastify.register(aiRoutes, { prefix: "/ai" });
 await fastify.register(currencyRoutes, { prefix: "/currencies" });
+await fastify.register(favoritesRoutes, { prefix: "/favorites" });
 
 // Health check
 fastify.get("/health", async () => ({
