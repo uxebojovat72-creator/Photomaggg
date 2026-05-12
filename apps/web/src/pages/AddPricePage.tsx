@@ -214,7 +214,7 @@ export default function AddPricePage() {
     setProductLoading(true);
     try {
       const result = await pricesApi.recognize(file);
-      if (result.name && result.provider !== "manual") {
+      if (result.name && result.provider !== "manual" && result.confidence >= 0.7) {
         setProductName(result.name);
         setProductBrand(result.brand ?? null);
         // Level 3: check for duplicates after AI recognition
