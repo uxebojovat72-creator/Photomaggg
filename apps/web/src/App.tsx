@@ -13,6 +13,8 @@ const AnalyticsPage = lazy(() => import("@/pages/AnalyticsPage"));
 const ProfilePage = lazy(() => import("@/pages/ProfilePage"));
 const ModerationPage = lazy(() => import("@/pages/ModerationPage"));
 const FavoritesPage = lazy(() => import("@/pages/FavoritesPage"));
+const ReceiptScanPage = lazy(() => import("@/pages/ReceiptScanPage"));
+const ShoppingListPage = lazy(() => import("@/pages/ShoppingListPage"));
 const NotFoundPage = lazy(() => import("@/pages/NotFoundPage"));
 
 function PageLoader() {
@@ -43,6 +45,8 @@ export default function App() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/moderation" element={<ModerationPage />} />
           <Route path="/favorites" element={<FavoritesPage />} />
+          <Route path="/receipt-scan" element={<ReceiptScanPage />} />
+          <Route path="/shopping-list" element={<ShoppingListPage />} />
           <Route path="/notifications" element={<PageLoader />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>

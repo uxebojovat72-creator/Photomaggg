@@ -13,6 +13,7 @@ import {
 } from "../services/price.service.js";
 import { lookupStorePrice } from "../services/store-price.service.js";
 import { authenticate, optionalAuth, requireModerator } from "../middleware/auth.js";
+import { prisma } from "../lib/prisma.js";
 
 const createPriceSchema = z.object({
   // Product: either existing UUID or new name
@@ -200,6 +201,56 @@ export default async function priceRoutes(fastify: FastifyInstance) {
       }
       const updated = await moderatePrice(req.params.id, req.user.sub, body.data);
       return reply.send(updated);
+    }
+  );
+
+  // POST /prices/batch — bulk create from receipt scan
+  fastify.post<{
+    Body: {
+      storeId?: string;
+      storeName?: string;
+      cityName?: string;
+      currencyCode?: string;
+      items: Array<{ name: string; brand?: string; price: number }>;
+    };
+  }>(
+    "/batch",
+    { preHandler: authenticate },
+    async (req, reply) => {
+      const { storeId, storeName, cityName, currencyCode = "RUB", items } = req.body;
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return reply.code(400).send({ message: "items array is required" });
+      }
+      if (!storeId && !storeName) {
+        return reply.code(400).send({ message: "storeId or storeName is required" });
+      }
+
+      const dbUser = await prisma.user.findUnique({ where: { id: req.user.sub } });
+
+      let created = 0;
+      const errors: string[] = [];
+
+      for (const item of items.slice(0, 50)) {
+        try {
+          await createPrice({
+            productName: item.brand ? `${item.brand} ${item.name}` : item.name,
+            storeId,
+            storeName,
+            cityName,
+            userId: req.user.sub,
+            userRole: req.user.role,
+            userTrustScore: dbUser?.trustScore ?? 0,
+            price: item.price,
+            currencyCode,
+          });
+          created++;
+        } catch (e) {
+          errors.push(item.name);
+        }
+      }
+
+      return reply.code(201).send({ created, failed: errors.length, errors });
     }
   );
 }

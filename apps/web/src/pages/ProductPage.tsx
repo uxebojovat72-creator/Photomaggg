@@ -109,6 +109,14 @@ export default function ProductPage() {
   const maxPrice = rubPrices.length ? Math.max(...rubPrices) : null;
   const avgPrice = rubPrices.length ? rubPrices.reduce((a, b) => a + b, 0) / rubPrices.length : null;
 
+  const priceBadge = (price: number) => {
+    if (!avgPrice || rubPrices.length < 2) return null;
+    const diff = (price - avgPrice) / avgPrice;
+    if (diff <= -0.1) return { label: `−${Math.round(-diff * 100)}% от среднего`, cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" };
+    if (diff >= 0.1) return { label: `+${Math.round(diff * 100)}% выше среднего`, cls: "bg-red-500/15 text-red-400 border-red-500/30" };
+    return null;
+  };
+
   const chartData = history.map((p) => ({
     date: new Date(p.date).toLocaleDateString("ru", { month: "short", day: "numeric" }),
     price: p.price ?? p.priceUsd,
@@ -234,10 +242,18 @@ export default function ProductPage() {
                     <span className="text-xs text-muted-foreground ml-auto">{formatRelativeDate(price.createdAt, "ru")}</span>
                   </div>
                 </div>
-                <div className="text-right flex-shrink-0">
+                <div className="text-right flex-shrink-0 space-y-0.5">
                   <p className={`font-bold ${idx === 0 ? "text-emerald-400" : ""}`}>
                     {fmtPrice(Number(price.price), price.currencyCode ?? "RUB")}
                   </p>
+                  {(() => {
+                    const badge = priceBadge(Number(price.price));
+                    return badge ? (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${badge.cls}`}>
+                        {badge.label}
+                      </span>
+                    ) : null;
+                  })()}
                 </div>
               </div>
             ))

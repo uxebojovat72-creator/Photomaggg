@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, User, Shield, Star, PlusCircle, ChevronRight, Moon, Sun } from "lucide-react";
+import { LogOut, User, Shield, Star, PlusCircle, ChevronRight, Moon, Sun, Heart, ShoppingCart, ReceiptText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -148,6 +148,30 @@ export default function ProfilePage() {
         >
           <PlusCircle className="h-4 w-4 text-primary" />
           <span className="flex-1">Добавить цену</span>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </button>
+        <button
+          className="w-full flex items-center gap-3 p-4 hover:bg-accent/30 transition-colors text-left text-sm"
+          onClick={() => navigate("/receipt-scan")}
+        >
+          <ReceiptText className="h-4 w-4 text-blue-400" />
+          <span className="flex-1">Сканировать чек</span>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </button>
+        <button
+          className="w-full flex items-center gap-3 p-4 hover:bg-accent/30 transition-colors text-left text-sm"
+          onClick={() => navigate("/favorites")}
+        >
+          <Heart className="h-4 w-4 text-red-400" />
+          <span className="flex-1">Избранное</span>
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        </button>
+        <button
+          className="w-full flex items-center gap-3 p-4 hover:bg-accent/30 transition-colors text-left text-sm"
+          onClick={() => navigate("/shopping-list")}
+        >
+          <ShoppingCart className="h-4 w-4 text-green-400" />
+          <span className="flex-1">Список покупок</span>
           <ChevronRight className="h-4 w-4 text-muted-foreground" />
         </button>
 
