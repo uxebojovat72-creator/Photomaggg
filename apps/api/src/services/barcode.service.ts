@@ -10,7 +10,7 @@
  *   • OpenBeautyFacts — cosmetics
  *   • OpenPetFoodFacts— pet food
  *   • UPCitemdb       — Western barcodes
- *   • Groq AI         — LAST RESORT: LLM asked for barcode by number
+ *   • Gemini+Google   — LAST RESORT: searches Google for the barcode in real time
  *
  * Russian store APIs may be blocked on datacenter IPs — Groq AI is the safety net.
  */
@@ -324,47 +324,45 @@ async function tryBarcodeList(code: string): Promise<BarcodeProduct | null> {
   }
 }
 
-// ─── Groq AI text lookup (last resort — LLM knows many product barcodes) ─────
+// ─── Gemini + Google Search (last resort — searches Google for barcode) ───────
 
-async function tryGroqBarcode(code: string): Promise<BarcodeProduct | null> {
-  if (!env.GROQ_API_KEY) return null;
+async function tryGeminiSearch(code: string): Promise<BarcodeProduct | null> {
+  if (!env.GEMINI_API_KEY) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
   try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [
-          {
-            role: "user",
-            content:
-              `Штрихкод EAN-13: ${code}\n\n` +
-              `Найди точное название товара, бренд, объём/вес и категорию.\n` +
-              `Отвечай ТОЛЬКО JSON без пояснений:\n` +
-              `{"name":"полное название","brand":"бренд или null","quantity":"объём/вес или null","category":"категория или null","confidence":0.0}\n\n` +
-              `Если штрихкод неизвестен — верни {"name":null}`,
-          },
-        ],
-        temperature: 0.1,
-        max_tokens: 150,
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text:
+                `Штрихкод EAN-13: ${code}\n\n` +
+                `Найди в интернете этот товар. Верни ТОЛЬКО JSON без пояснений:\n` +
+                `{"name":"полное название с объёмом/весом","brand":"бренд или null","quantity":"объём/вес или null","category":"категория или null","price":число_или_null,"store":"магазин где эта цена или null"}\n\n` +
+                `Если товар не найден — {"name":null}`,
+            }],
+          }],
+          tools: [{ "google_search": {} }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 300 },
+        }),
+        signal: controller.signal,
+      }
+    );
     if (!res.ok) return null;
-    type R = { choices?: Array<{ message?: { content?: string } }> };
-    const data = (await res.json()) as R;
-    const text = data.choices?.[0]?.message?.content?.trim();
+    type GeminiR = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const data = (await res.json()) as GeminiR;
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
     if (!text) return null;
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) return null;
-    type P = { name?: string | null; brand?: string | null; quantity?: string | null; category?: string | null; confidence?: number };
+    type P = { name?: string | null; brand?: string | null; quantity?: string | null; category?: string | null; price?: number | null; store?: string | null };
     const parsed = JSON.parse(match[0]) as P;
     if (!parsed.name || parsed.name.trim().length < 3) return null;
-    if (typeof parsed.confidence === "number" && parsed.confidence < 0.3) return null;
-    console.log(`[Groq AI] barcode ${code} → "${parsed.name}"`);
+    console.log(`[Gemini Search] barcode ${code} → "${parsed.name}"`);
     return {
       name: parsed.name.trim(),
       brand: parsed.brand ?? null,
@@ -373,10 +371,15 @@ async function tryGroqBarcode(code: string): Promise<BarcodeProduct | null> {
       quantity: parsed.quantity ?? null,
       description: null,
       categoryHint: parsed.category ?? null,
+      price: typeof parsed.price === "number" ? parsed.price : null,
+      pricePromo: null,
+      storeSource: parsed.store ?? null,
       source: "ai",
     };
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -579,6 +582,6 @@ export async function lookupBarcodeExternal(code: string): Promise<BarcodeProduc
   const globalResult = bestResult([beauty, pet, upc]);
   if (globalResult) return withCleanup(globalResult);
 
-  // 4. Last resort: ask Groq AI by barcode number
-  return tryGroqBarcode(code);
+  // 4. Last resort: Gemini searches Google for this barcode in real time
+  return tryGeminiSearch(code);
 }
