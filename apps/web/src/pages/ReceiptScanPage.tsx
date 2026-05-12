@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { pricesApi } from "@/api/prices.api";
 import { storesApi, type StoreResult } from "@/api/stores.api";
 import { formatPrice } from "@priceradar/shared";
+import { useAuthStore } from "@/store/auth.store";
+import { toast } from "@/hooks/useToast";
 import { STORE_CHAINS, CATEGORY_LABELS, type StoreChain } from "@/lib/stores-list";
 
 type Step = "capture" | "scanning" | "review" | "store" | "publishing" | "done";
@@ -31,9 +33,17 @@ const STORE_BY_CATEGORY = (Object.keys(CATEGORY_LABELS) as StoreChain["category"
 
 export default function ReceiptScanPage() {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuthStore();
   const fileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      toast({ title: "Требуется вход", description: "Войдите, чтобы сканировать чеки", variant: "destructive" });
+      navigate("/login", { state: { from: "/receipt-scan" } });
+    }
+  }, [isAuthenticated, navigate]);
 
   const [step, setStep] = useState<Step>("capture");
   const [items, setItems] = useState<ReceiptItem[]>([]);
