@@ -23,6 +23,14 @@ export const pricesApi = {
     }).then((r) => r.data);
   },
 
+  recognizePrice: (photo: File) => {
+    const fd = new FormData();
+    fd.append("photo", photo);
+    return api.post<{ price: number | null; currency: string }>("/ai/recognize-price", fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }).then((r) => r.data);
+  },
+
   lookupStorePrice: (params: { storeName: string; barcode?: string | null; productName?: string }) =>
     api.get<{
       found: boolean;

@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { Camera, Upload, X, Loader2, CheckCircle, Search, ChevronRight, ArrowLeft, Plus, Barcode, Sparkles, ExternalLink } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import {
+  Camera, Upload, X, Loader2, CheckCircle, Search,
+  ArrowLeft, Plus, Barcode, MapPin, Tag, ChevronRight,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { useCamera } from "@/hooks/useCamera";
 import { useBarcode } from "@/hooks/useBarcode";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -13,91 +15,88 @@ import { productsApi } from "@/api/products.api";
 import { storesApi, type StoreResult } from "@/api/stores.api";
 import { geoApi, type City } from "@/api/geo.api";
 import { toast } from "@/hooks/useToast";
-import type { AiRecognitionResult, Product } from "@priceradar/shared";
+import type { Product } from "@priceradar/shared";
 
-type Step = "photo" | "ai" | "product" | "store" | "price" | "done";
-type CaptureMode = "barcode" | "photo";
+type Step = "barcode" | "product_photo" | "price_photo" | "store" | "confirm" | "done";
 
-const CURRENCIES = ["USD", "EUR", "RUB", "GBP", "TRY", "CNY", "JPY", "KZT", "AED", "BRL"];
 const NEW_PRODUCT_ID = "__new__";
+const CURRENCIES = ["RUB", "USD", "EUR", "GBP", "KZT", "TRY"];
+const QUICK_CHAINS = ["Пятёрочка", "Магнит", "ВкусВилл", "Перекрёсток", "Лента", "Дикси", "Ашан"];
 
 const SOURCE_LABELS: Record<string, string> = {
-  local: "локальная база",
-  "5ka": "Пятёрочка",
-  perekrestok: "Перекрёсток",
-  magnit: "Магнит",
-  vkusvill: "ВкусВилл",
-  barcodelist: "barcode-list.ru",
-  openbeautyfacts: "Open Beauty Facts",
-  openpetfoodfacts: "Open Pet Food Facts",
-  upcitemdb: "UPC Item DB",
-  ai: "Google (AI)",
+  local: "база данных", "5ka": "Пятёрочка", perekrestok: "Перекрёсток",
+  magnit: "Магнит", vkusvill: "ВкусВилл", barcodelist: "barcode-list.ru",
+  openbeautyfacts: "Open Beauty Facts", openpetfoodfacts: "Open Pet Food Facts",
+  upcitemdb: "UPC Item DB", ai: "Google AI",
 };
+
+const STEP_PROGRESS: Record<Step, number> = {
+  barcode: 15, product_photo: 35, price_photo: 60, store: 80, confirm: 95, done: 100,
+};
+
+function ProgressBar({ value }: { value: number }) {
+  return (
+    <div className="h-1 bg-muted rounded-full overflow-hidden">
+      <div
+        className="h-full bg-primary rounded-full transition-all duration-500"
+        style={{ width: `${value}%` }}
+      />
+    </div>
+  );
+}
 
 export default function AddPricePage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { isAuthenticated } = useAuthStore();
-  const { videoRef, state: cam, startCamera, capture, reset: resetCam, fromFile } = useCamera();
+  const { videoRef, state: cam, startCamera, capture, reset: resetCam } = useCamera();
 
   const barcodeVideoRef = useRef<HTMLVideoElement>(null);
   const { state: barcode, start: startBarcode, stop: stopBarcode } = useBarcode(barcodeVideoRef);
 
-  const prefill = location.state as { productId?: string; productName?: string } | null;
-
-  const [step, setStep] = useState<Step>(prefill?.productId ? "store" : "photo");
-  const [captureMode, setCaptureMode] = useState<CaptureMode>("barcode");
-  const [aiResult, setAiResult] = useState<AiRecognitionResult | null>(null);
-  const [barcodeLoading, setBarcodeLoading] = useState(false);
-  const [barcodeApiError, setBarcodeApiError] = useState<string | null>(null);
-  const [productExtra, setProductExtra] = useState<{
-    quantity?: string | null;
-    description?: string | null;
-    categoryHint?: string | null;
-    source?: string | null;
-    autoPrice?: number | null;
-    autoPricePromo?: number | null;
-    autoPriceStore?: string | null;
-  } | null>(null);
-
-  // Store price lookup
-  const [aiPriceLoading, setAiPriceLoading] = useState(false);
-  const [aiPriceResult, setAiPriceResult] = useState<{
-    found: boolean;
-    price?: number;
-    pricePromo?: number;
-    currency: string;
-    productName?: string;
-    storeDisplayName?: string;
-    productUrl?: string;
-    searchUrl: string;
-  } | null>(null);
+  const [step, setStep] = useState<Step>("barcode");
 
   // Product
-  const [productQuery, setProductQuery] = useState(prefill?.productName ?? "");
-  const [productResults, setProductResults] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const debouncedPQ = useDebounce(productQuery, 300);
+  const [productExtra, setProductExtra] = useState<{
+    quantity?: string | null;
+    categoryHint?: string | null;
+    source?: string | null;
+  } | null>(null);
+  const [productName, setProductName] = useState("");
+  const [productBrand, setProductBrand] = useState<string | null>(null);
+  const [productLoading, setProductLoading] = useState(false);
+  const [productPhotoUrl, setProductPhotoUrl] = useState<string | null>(null);
+  const [productPhotoFile, setProductPhotoFile] = useState<File | null>(null);
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [barcodeError, setBarcodeError] = useState<string | null>(null);
 
-  // Store — search existing
+  // Price
+  const [price, setPrice] = useState("");
+  const [currency, setCurrency] = useState("RUB");
+  const [priceLoading, setPriceLoading] = useState(false);
+  const [pricePhotoUrl, setPricePhotoUrl] = useState<string | null>(null);
+
+  // Store
   const [storeQuery, setStoreQuery] = useState("");
   const [storeResults, setStoreResults] = useState<StoreResult[]>([]);
   const [selectedStore, setSelectedStore] = useState<StoreResult | null>(null);
-  const debouncedSQ = useDebounce(storeQuery, 300);
-
-  // Store — create new
   const [newStoreMode, setNewStoreMode] = useState(false);
   const [newStoreName, setNewStoreName] = useState("");
   const [newStoreCityQ, setNewStoreCityQ] = useState("");
   const [newStoreCityResults, setNewStoreCityResults] = useState<City[]>([]);
   const [newStoreCity, setNewStoreCity] = useState<City | null>(null);
-  const debouncedCityQ = useDebounce(newStoreCityQ, 300);
+  const [gpsCity, setGpsCity] = useState<string | null>(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
 
-  // Price
-  const [price, setPrice] = useState("");
-  const [currency, setCurrency] = useState("RUB");
   const [publishing, setPublishing] = useState(false);
 
+  const debouncedSQ = useDebounce(storeQuery, 300);
+  const debouncedCityQ = useDebounce(newStoreCityQ, 300);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const priceFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auth guard
   useEffect(() => {
     if (!isAuthenticated) {
       toast({ title: "Требуется вход", description: "Войдите, чтобы добавить цены", variant: "destructive" });
@@ -105,86 +104,75 @@ export default function AddPricePage() {
     }
   }, [isAuthenticated, navigate]);
 
-  // Auto-start barcode scanner when tab is active on step "photo"
+  // Barcode scanner — auto-start on barcode step
   useEffect(() => {
-    if (step === "photo" && captureMode === "barcode") {
+    if (step === "barcode") {
       startBarcode();
     } else {
       stopBarcode();
     }
-  }, [step, captureMode, startBarcode, stopBarcode]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
-  // Handle barcode scan result — queries 4 databases in parallel
+  // Camera — auto-start for product photo step
+  useEffect(() => {
+    if (step === "product_photo" && !productPhotoUrl) {
+      startCamera();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, productPhotoUrl]);
+
+  // Camera — auto-start for price photo step
+  useEffect(() => {
+    if (step === "price_photo" && !pricePhotoUrl) {
+      startCamera();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, pricePhotoUrl]);
+
+  // Stop camera when leaving camera steps
+  useEffect(() => {
+    if (step !== "product_photo" && step !== "price_photo") {
+      resetCam();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
+  // Barcode scan result
   useEffect(() => {
     if (!barcode.result) return;
     setBarcodeLoading(true);
-    setBarcodeApiError(null);
+    setBarcodeError(null);
     productsApi.lookupBarcode(barcode.result)
       .then((data) => {
         const p = data.product;
         const sourceLabel = SOURCE_LABELS[data.source] ?? data.source;
-        const extra = {
-          quantity: p.quantity,
-          description: p.description,
-          categoryHint: p.categoryHint,
-          source: sourceLabel,
-          autoPrice: p.price ?? null,
-          autoPricePromo: p.pricePromo ?? null,
-          autoPriceStore: p.storeSource ?? null,
-        };
-        if (data.source === "local" && p.id) {
-          setSelectedProduct({
-            id: p.id,
-            name: p.name,
-            brand: p.brand ?? null,
-            barcode: p.barcode,
-            categoryId: null,
-            imageUrl: p.imageUrl ?? null,
-            aiGenerated: false,
-            aiConfirmed: true,
-            aliases: [],
-            createdBy: "",
-            createdAt: new Date().toISOString(),
-          });
-          setProductExtra(extra);
-          setStep("store");
-          toast({ title: "Товар найден!", description: p.name });
-        } else {
-          setSelectedProduct({
-            id: NEW_PRODUCT_ID,
-            name: p.name,
-            brand: p.brand ?? null,
-            barcode: barcode.result,
-            categoryId: null,
-            imageUrl: p.imageUrl ?? null,
-            aiGenerated: true,
-            aiConfirmed: false,
-            aliases: [],
-            createdBy: "",
-            createdAt: new Date().toISOString(),
-          });
-          setProductExtra(extra);
-          setStep("store");
-          const priceHint = extra.autoPrice != null ? ` · ${extra.autoPricePromo ?? extra.autoPrice}₽` : "";
-          toast({ title: "Товар найден!", description: `${p.name}${p.brand ? ` · ${p.brand}` : ""} (${sourceLabel})${priceHint}` });
-        }
+        setSelectedProduct({
+          id: data.source === "local" && p.id ? p.id : NEW_PRODUCT_ID,
+          name: p.name,
+          brand: p.brand ?? null,
+          barcode: barcode.result!,
+          categoryId: null,
+          imageUrl: p.imageUrl ?? null,
+          aiGenerated: data.source !== "local",
+          aiConfirmed: data.source === "local",
+          aliases: [],
+          createdBy: "",
+          createdAt: new Date().toISOString(),
+        });
+        setProductName(p.name);
+        setProductBrand(p.brand ?? null);
+        setProductExtra({ quantity: p.quantity, categoryHint: p.categoryHint, source: sourceLabel });
+        toast({ title: "Товар найден!", description: p.name });
+        setPricePhotoUrl(null);
+        setStep("price_photo");
       })
-      .catch((err) => {
-        const isNetwork = !err?.response;
-        const msg = isNetwork
-          ? `Сервер недоступен. Проверьте VITE_API_URL (сейчас: ${import.meta.env.VITE_API_URL ?? "/api"})`
-          : "Штрихкод не найден ни в одной базе данных";
-        setBarcodeApiError(msg);
-        startBarcode(); // restart scanner
+      .catch(() => {
+        setBarcodeError("Не найден в базе — сфотографируйте этикетку");
       })
       .finally(() => setBarcodeLoading(false));
-  }, [barcode.result, startBarcode]);
-
-  // Product search
-  useEffect(() => {
-    if (debouncedPQ.length < 2) { setProductResults([]); return; }
-    productsApi.search({ q: debouncedPQ, limit: 8 }).then((r) => setProductResults(r.data)).catch(() => {});
-  }, [debouncedPQ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barcode.result]);
 
   // Store search
   useEffect(() => {
@@ -192,60 +180,84 @@ export default function AddPricePage() {
     storesApi.search({ q: debouncedSQ }).then(setStoreResults).catch(() => {});
   }, [debouncedSQ]);
 
-  // City search (for new store)
+  // City search
   useEffect(() => {
     if (debouncedCityQ.length < 2) { setNewStoreCityResults([]); return; }
     geoApi.cities({ q: debouncedCityQ }).then(setNewStoreCityResults).catch(() => {});
   }, [debouncedCityQ]);
 
-  const handleCapture = async () => {
+  // ─── Handlers ─────────────────────────────────────────────────────────────
+
+  const handleProductCapture = () => {
     const file = capture();
     if (!file) return;
-    runAI(file);
+    setProductPhotoFile(file);
+    setProductPhotoUrl(URL.createObjectURL(file));
+    resetCam();
+    runProductAI(file);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleProductFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    fromFile(file);
-    runAI(file);
+    setProductPhotoFile(file);
+    setProductPhotoUrl(URL.createObjectURL(file));
+    resetCam();
+    runProductAI(file);
+    e.target.value = "";
   };
 
-  const runAI = async (file: File) => {
-    setStep("ai");
+  const runProductAI = async (file: File) => {
+    setProductLoading(true);
     try {
       const result = await pricesApi.recognize(file);
-      setAiResult(result);
       if (result.name && result.provider !== "manual") {
-        setProductQuery(result.name);
-      } else {
-        toast({
-          title: "ИИ не распознал товар",
-          description: "Введите название вручную или загрузите более чёткое фото",
-          variant: "destructive",
-        });
+        setProductName(result.name);
+        setProductBrand(result.brand ?? null);
       }
-    } catch {
-      toast({
-        title: "Ошибка связи с ИИ",
-        description: "Проверьте подключение к интернету или введите товар вручную",
-        variant: "destructive",
-      });
-    } finally {
-      setStep("product");
+    } catch { /* silent */ } finally {
+      setProductLoading(false);
     }
   };
 
-  const selectProduct = (p: Product) => {
-    setSelectedProduct(p);
-    setStep("store");
+  const handlePriceCapture = () => {
+    const file = capture();
+    if (!file) return;
+    setPricePhotoUrl(URL.createObjectURL(file));
+    resetCam();
+    runPriceAI(file);
   };
 
-  const useProductName = () => {
+  const handlePriceFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPricePhotoUrl(URL.createObjectURL(file));
+    resetCam();
+    runPriceAI(file);
+    e.target.value = "";
+  };
+
+  const runPriceAI = async (file: File) => {
+    setPriceLoading(true);
+    try {
+      const result = await pricesApi.recognizePrice(file);
+      if (result.price != null) {
+        setPrice(String(result.price));
+        setCurrency(result.currency ?? "RUB");
+        toast({ title: `Цена определена: ${result.price} ₽` });
+      } else {
+        toast({ title: "Введите цену вручную" });
+      }
+    } catch { /* silent */ } finally {
+      setPriceLoading(false);
+    }
+  };
+
+  const confirmProduct = () => {
     setSelectedProduct({
       id: NEW_PRODUCT_ID,
-      name: productQuery,
-      brand: aiResult?.brand ?? null,
+      name: productName.trim(),
+      brand: productBrand,
       barcode: null,
       categoryId: null,
       imageUrl: null,
@@ -255,107 +267,86 @@ export default function AddPricePage() {
       createdBy: "",
       createdAt: new Date().toISOString(),
     });
-    setStep("store");
+    resetCam();
+    setPricePhotoUrl(null);
+    setStep("price_photo");
   };
 
-  const IS_5KA = /пятерочк|пятёрочк|pyaterochka|5ka/i;
-
-  const lookupPriceForStore = async (store: StoreResult, product: typeof selectedProduct, extra: typeof productExtra) => {
-    if (!product) return;
-    // If store is Пятёрочка and we already fetched the price from 5ka during barcode scan → use it instantly
-    if (IS_5KA.test(store.name) && extra?.autoPrice != null) {
-      setAiPriceResult({
-        found: true,
-        price: extra.autoPrice,
-        pricePromo: extra.autoPricePromo ?? undefined,
-        currency: "RUB",
-        storeDisplayName: "Пятёрочка",
-        searchUrl: `https://5ka.ru/catalog/search/?text=${encodeURIComponent(product.barcode ?? product.name ?? "")}`,
-      });
-      setPrice(String(extra.autoPricePromo ?? extra.autoPrice));
-      return;
-    }
-    // Otherwise query the selected store's API
-    setAiPriceLoading(true);
-    setAiPriceResult(null);
+  const detectGpsCity = async () => {
+    setGpsLoading(true);
     try {
-      const result = await pricesApi.lookupStorePrice({
-        storeName: store.name,
-        barcode: product.barcode,
-        productName: product.name,
-      });
-      setAiPriceResult(result);
-      if (result.found && result.price != null) {
-        setPrice(String(result.pricePromo ?? result.price));
-        toast({ title: "Цена найдена!", description: `${result.pricePromo ?? result.price} ₽ · ${result.storeDisplayName ?? store.name}` });
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 })
+      );
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&format=json&accept-language=ru`,
+        { headers: { "User-Agent": "PriceRadar/1.0" } }
+      );
+      if (!res.ok) throw new Error();
+      type N = { address?: { city?: string; town?: string; village?: string } };
+      const d = (await res.json()) as N;
+      const city = d.address?.city ?? d.address?.town ?? d.address?.village ?? null;
+      setGpsCity(city);
+      if (city) {
+        setNewStoreCityQ(city);
+        toast({ title: `Город: ${city}` });
       }
     } catch {
-      setAiPriceResult({ found: false, currency: "RUB", searchUrl: `https://yandex.ru/search/?text=${encodeURIComponent(`${product.name} ${store.name} цена`)}` });
+      toast({ title: "Не удалось определить местоположение", variant: "destructive" });
     } finally {
-      setAiPriceLoading(false);
+      setGpsLoading(false);
+    }
+  };
+
+  const selectQuickChain = (chainName: string) => {
+    if (gpsCity) {
+      setSelectedStore({
+        id: "__new__",
+        name: chainName,
+        chainName: chainName,
+        address: null,
+        city: { id: "__new__", name: gpsCity, country: { id: "__new__", name: "Россия", code: "RU", flagEmoji: "🇷🇺" } },
+      });
+      setStep("confirm");
+    } else {
+      setNewStoreName(chainName);
+      setNewStoreMode(true);
     }
   };
 
   const selectStore = (s: StoreResult) => {
     setSelectedStore(s);
-    setNewStoreMode(false);
-    setAiPriceResult(null);
-    setStep("price");
-    lookupPriceForStore(s, selectedProduct, productExtra);
-  };
-
-  const handleAiPriceLookup = async () => {
-    if (!selectedStore || !selectedProduct) return;
-    lookupPriceForStore(selectedStore, selectedProduct, productExtra);
-  };
-
-  const enterNewStoreMode = () => {
-    setNewStoreName(storeQuery);
-    setNewStoreCity(null);
-    setNewStoreCityQ("");
-    setNewStoreMode(true);
+    setStep("confirm");
   };
 
   const confirmNewStore = () => {
-    if (!newStoreName.trim()) {
-      toast({ title: "Введите название магазина", variant: "destructive" });
-      return;
-    }
     const cityName = newStoreCity?.name ?? newStoreCityQ.trim();
-    if (!cityName) {
-      toast({ title: "Введите название города", variant: "destructive" });
+    if (!newStoreName.trim() || !cityName) {
+      toast({ title: "Введите название магазина и город", variant: "destructive" });
       return;
     }
-    const cityForStore = newStoreCity ?? {
-      id: "__new__",
-      name: cityName,
-      country: { id: "__new__", name: "Russia", code: "RU", flagEmoji: "🇷🇺" },
-    };
-    const newStore: StoreResult = {
+    setSelectedStore({
       id: "__new__",
       name: newStoreName.trim(),
       chainName: null,
       address: null,
       city: {
-        ...cityForStore,
-        country: { ...cityForStore.country, flagEmoji: cityForStore.country.flagEmoji ?? "" },
+        id: newStoreCity?.id ?? "__new__",
+        name: cityName,
+        country: newStoreCity?.country ?? { id: "__new__", name: "Россия", code: "RU", flagEmoji: "🇷🇺" },
       },
-    };
-    setSelectedStore(newStore);
+    });
     setNewStoreMode(false);
-    setAiPriceResult(null);
-    setStep("price");
-    lookupPriceForStore(newStore, selectedProduct, productExtra);
+    setStep("confirm");
   };
 
   const handlePublish = async () => {
-    if (!selectedProduct || !selectedStore || !price) return;
-    const priceNum = parseFloat(price);
+    if (!selectedProduct || !selectedStore) return;
+    const priceNum = price ? parseFloat(price) : NaN;
     if (isNaN(priceNum) || priceNum <= 0) {
-      toast({ title: "Неверная цена", description: "Введите корректную цену", variant: "destructive" });
+      toast({ title: "Введите корректную цену", variant: "destructive" });
       return;
     }
-
     setPublishing(true);
     try {
       const fd = new FormData();
@@ -373,230 +364,321 @@ export default function AddPricePage() {
       }
       fd.append("price", String(priceNum));
       fd.append("currencyCode", currency);
-      if (aiResult?.name) fd.append("aiRecognizedName", aiResult.name);
-      if (cam.capturedFile) fd.append("photo", cam.capturedFile);
-
+      if (productPhotoFile) fd.append("photo", productPhotoFile);
       await pricesApi.create(fd);
       navigator.vibrate?.(50);
       setStep("done");
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Не удалось опубликовать";
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Ошибка публикации";
       toast({ title: "Ошибка", description: msg, variant: "destructive" });
     } finally {
       setPublishing(false);
     }
   };
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const resetAll = () => {
+    resetCam();
+    setStep("barcode");
+    setSelectedProduct(null); setProductExtra(null);
+    setProductName(""); setProductBrand(null);
+    setProductLoading(false); setProductPhotoUrl(null); setProductPhotoFile(null);
+    setBarcodeError(null); setBarcodeLoading(false);
+    setPrice(""); setCurrency("RUB");
+    setPriceLoading(false); setPricePhotoUrl(null);
+    setSelectedStore(null); setStoreQuery(""); setStoreResults([]);
+    setNewStoreMode(false); setNewStoreName(""); setNewStoreCityQ(""); setNewStoreCity(null);
+    setGpsCity(null);
+  };
 
-  // ─── STEP: PHOTO ──────────────────────────────────────────────────────────
+  const progress = STEP_PROGRESS[step];
 
-  if (step === "photo") return (
+  // ─── STEP: BARCODE ────────────────────────────────────────────────────────
+
+  if (step === "barcode") return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)}><ArrowLeft className="h-5 w-5" /></Button>
-        <div>
+        <div className="flex-1">
           <h1 className="font-bold">Добавить цену</h1>
-          <p className="text-xs text-muted-foreground">Шаг 1 из 4</p>
+          <p className="text-xs text-muted-foreground">Шаг 1 — сканируем штрихкод</p>
         </div>
       </div>
+      <ProgressBar value={progress} />
 
-      {/* Mode tabs */}
-      <div className="flex rounded-xl border overflow-hidden">
-        <button
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${captureMode === "barcode" ? "bg-primary text-primary-foreground" : "hover:bg-accent/40"}`}
-          onClick={() => { setCaptureMode("barcode"); resetCam(); }}
-        >
-          <Barcode className="h-4 w-4" /> Штрихкод
-        </button>
-        <button
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${captureMode === "photo" ? "bg-primary text-primary-foreground" : "hover:bg-accent/40"}`}
-          onClick={() => { setCaptureMode("photo"); stopBarcode(); }}
-        >
-          <Camera className="h-4 w-4" /> Фото ценника
-        </button>
-      </div>
-
-      {/* Barcode mode */}
-      {captureMode === "barcode" && (
-        <div className="space-y-3">
-          <div className="rounded-xl border bg-card overflow-hidden relative">
-            <video
-              ref={barcodeVideoRef}
-              className="w-full aspect-[4/3] object-cover bg-black"
-              playsInline
-              muted
-              autoPlay
-            />
-            {/* Scanning overlay */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="relative w-64 h-40">
-                {/* Corner brackets */}
-                <div className="absolute top-0 left-0 w-8 h-8 border-t-3 border-l-3 border-white rounded-tl" style={{ borderWidth: "3px" }} />
-                <div className="absolute top-0 right-0 w-8 h-8 border-t-3 border-r-3 border-white rounded-tr" style={{ borderWidth: "3px" }} />
-                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-3 border-l-3 border-white rounded-bl" style={{ borderWidth: "3px" }} />
-                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-3 border-r-3 border-white rounded-br" style={{ borderWidth: "3px" }} />
-                {/* Animated scan line — always visible while camera is open */}
-                {(barcode.scanning || barcodeLoading) && (
-                  <div
-                    className="absolute left-0 right-0 h-0.5 animate-scan-line"
-                    style={{ background: "linear-gradient(90deg, transparent, #f00 20%, #f00 80%, transparent)", boxShadow: "0 0 6px 2px rgba(255,0,0,0.6)" }}
-                  />
-                )}
-              </div>
-            </div>
-            {barcodeLoading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-                <Loader2 className="h-8 w-8 animate-spin text-white" />
-                <span className="text-white ml-2 text-sm font-medium">Поиск в 4 базах данных...</span>
-              </div>
+      <div className="rounded-xl border bg-card overflow-hidden relative">
+        <video
+          ref={barcodeVideoRef}
+          className="w-full aspect-[4/3] object-cover bg-black"
+          playsInline muted autoPlay
+        />
+        {/* Viewfinder overlay */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="relative w-64 h-40">
+            <div className="absolute top-0 left-0 w-8 h-8 border-white" style={{ borderWidth: "3px 0 0 3px", borderRadius: "4px 0 0 0" }} />
+            <div className="absolute top-0 right-0 w-8 h-8 border-white" style={{ borderWidth: "3px 3px 0 0", borderRadius: "0 4px 0 0" }} />
+            <div className="absolute bottom-0 left-0 w-8 h-8 border-white" style={{ borderWidth: "0 0 3px 3px", borderRadius: "0 0 0 4px" }} />
+            <div className="absolute bottom-0 right-0 w-8 h-8 border-white" style={{ borderWidth: "0 3px 3px 0", borderRadius: "0 0 4px 0" }} />
+            {(barcode.scanning || barcodeLoading) && (
+              <div
+                className="absolute left-0 right-0 h-0.5 animate-scan-line"
+                style={{ background: "linear-gradient(90deg, transparent, #ef4444 20%, #ef4444 80%, transparent)", boxShadow: "0 0 6px 2px rgba(239,68,68,0.6)" }}
+              />
             )}
           </div>
+        </div>
+        {barcodeLoading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 gap-2">
+            <Loader2 className="h-8 w-8 animate-spin text-white" />
+            <p className="text-white text-sm">Поиск в базах данных...</p>
+          </div>
+        )}
+      </div>
 
-          <p className="text-center text-sm text-muted-foreground">
-            {barcode.scanning ? "Наведите камеру на штрихкод" : barcode.error ?? "Запуск камеры..."}
-          </p>
+      <p className="text-center text-sm text-muted-foreground">
+        {barcode.scanning ? "Наведите камеру на штрихкод товара" : barcode.error ?? "Запуск камеры..."}
+      </p>
 
-          {barcodeApiError && (
-            <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive space-y-2">
-              <p>{barcodeApiError}</p>
-              <Button size="sm" className="w-full" onClick={() => { setBarcodeApiError(null); startBarcode(); }}>
-                Сканировать снова
-              </Button>
-            </div>
-          )}
-
-          {barcode.error && !barcodeApiError && (
-            <Button className="w-full" onClick={() => { setBarcodeApiError(null); startBarcode(); }}>
+      {barcodeError && (
+        <div className="rounded-xl border border-orange-300 bg-orange-50 dark:bg-orange-950/30 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Barcode className="h-4 w-4 text-orange-500 flex-shrink-0" />
+            <p className="text-sm font-medium text-orange-700 dark:text-orange-300">{barcodeError}</p>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" className="flex-1" onClick={() => { setBarcodeError(null); startBarcode(); }}>
               Повторить
             </Button>
-          )}
-
-          <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("product")}>
-            Нет штрихкода → ввести вручную
-          </Button>
+            <Button size="sm" variant="outline" className="flex-1" onClick={() => setStep("product_photo")}>
+              Фото товара →
+            </Button>
+          </div>
         </div>
       )}
 
-      {/* Photo mode */}
-      {captureMode === "photo" && (
-        <div className="space-y-3">
-          <div className="rounded-xl border bg-card overflow-hidden">
-            {cam.isActive ? (
-              <div className="relative">
-                <video ref={videoRef} className="w-full aspect-[4/3] object-cover bg-black" playsInline muted autoPlay />
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-                  <Button size="lg" className="rounded-full h-14 w-14 p-0 shadow-xl" onClick={handleCapture}>
-                    <Camera className="h-6 w-6" />
-                  </Button>
-                </div>
-                <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-black/40 text-white hover:bg-black/60" onClick={resetCam}>
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            ) : cam.capturedUrl ? (
-              <div className="relative">
-                <img src={cam.capturedUrl} alt="captured" className="w-full aspect-[4/3] object-cover" />
-                <Button variant="ghost" size="icon" className="absolute top-2 right-2 bg-black/40 text-white hover:bg-black/60" onClick={resetCam}>
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            ) : (
-              <div className="aspect-[4/3] flex flex-col items-center justify-center gap-4 text-muted-foreground">
-                <Camera className="h-12 w-12 opacity-30" />
-                <p className="text-sm">Сфотографируйте ценник</p>
-              </div>
-            )}
-          </div>
-
-          {cam.error && <p className="text-sm text-destructive text-center">{cam.error}</p>}
-
-          <div className="grid grid-cols-2 gap-3">
-            <Button className="gap-2" onClick={startCamera} disabled={cam.isActive}>
-              <Camera className="h-4 w-4" /> Открыть камеру
-            </Button>
-            <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()}>
-              <Upload className="h-4 w-4" /> Загрузить фото
-            </Button>
-            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
-          </div>
-
-          <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("product")}>
-            Пропустить фото → ввести вручную
-          </Button>
-        </div>
-      )}
+      <Button
+        variant="ghost"
+        className="w-full text-sm text-muted-foreground"
+        onClick={() => setStep("product_photo")}
+      >
+        Нет штрихкода — сфотографировать товар
+      </Button>
     </div>
   );
 
-  // ─── STEP: AI LOADING ────────────────────────────────────────────────────
+  // ─── STEP: PRODUCT PHOTO ──────────────────────────────────────────────────
 
-  if (step === "ai") return (
-    <div className="max-w-lg mx-auto px-4 py-20 flex flex-col items-center gap-4">
-      <Loader2 className="h-10 w-10 animate-spin text-primary" />
-      <p className="font-medium">ИИ распознаёт товар...</p>
-      <p className="text-sm text-muted-foreground">Обычно занимает менее 3 секунд</p>
-      {cam.capturedUrl && <img src={cam.capturedUrl} alt="" className="h-32 w-32 rounded-xl object-cover border mt-2" />}
-    </div>
-  );
-
-  // ─── STEP: PRODUCT ────────────────────────────────────────────────────────
-
-  if (step === "product") return (
+  if (step === "product_photo") return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => setStep("photo")}><ArrowLeft className="h-5 w-5" /></Button>
-        <div>
-          <h1 className="font-bold">Выбрать товар</h1>
-          <p className="text-xs text-muted-foreground">Шаг 2 из 4</p>
-        </div>
-      </div>
-
-      {aiResult?.name && (
-        <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
-          <p className="text-xs text-primary font-medium mb-1">Определено:</p>
-          <p className="font-medium">{aiResult.name}</p>
-          {aiResult.brand && <p className="text-sm text-muted-foreground">{aiResult.brand}</p>}
-          <Badge variant="outline" className="mt-1 text-[10px]">
-            {Math.round(aiResult.confidence * 100)}% уверенность · {aiResult.provider}
-          </Badge>
-        </div>
-      )}
-
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Поиск по названию товара..."
-          value={productQuery}
-          onChange={(e) => setProductQuery(e.target.value)}
-          className="pl-9"
-          autoFocus
-        />
-      </div>
-
-      <div className="space-y-1 max-h-64 overflow-y-auto">
-        {productResults.map((p) => (
-          <button
-            key={p.id}
-            className="w-full flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/30 transition-colors text-left"
-            onClick={() => selectProduct(p)}
-          >
-            <div className="h-10 w-10 rounded bg-muted flex items-center justify-center text-lg flex-shrink-0">📦</div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{p.name}</p>
-              {p.brand && <p className="text-xs text-muted-foreground">{p.brand}</p>}
-            </div>
-            <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-          </button>
-        ))}
-      </div>
-
-      {productQuery.length >= 2 && (
-        <Button className="w-full gap-2" onClick={useProductName}>
-          <Plus className="h-4 w-4" />
-          {productResults.length === 0 ? `Добавить «${productQuery}»` : `Использовать «${productQuery}»`}
+        <Button variant="ghost" size="icon" onClick={() => { resetCam(); setStep("barcode"); }}>
+          <ArrowLeft className="h-5 w-5" />
         </Button>
+        <div className="flex-1">
+          <h1 className="font-bold">Фото товара</h1>
+          <p className="text-xs text-muted-foreground">Шаг 2 — AI определит название</p>
+        </div>
+      </div>
+      <ProgressBar value={progress} />
+
+      <div className="rounded-xl border bg-card overflow-hidden relative">
+        {productPhotoUrl ? (
+          <>
+            <img src={productPhotoUrl} alt="товар" className="w-full aspect-[4/3] object-cover" />
+            {productLoading ? (
+              <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
+                <Loader2 className="h-8 w-8 animate-spin text-white" />
+                <p className="text-white text-sm font-medium">AI определяет название...</p>
+              </div>
+            ) : (
+              <Button
+                variant="ghost" size="icon"
+                className="absolute top-2 right-2 bg-black/50 text-white hover:bg-black/70"
+                onClick={() => { setProductPhotoUrl(null); setProductPhotoFile(null); setProductName(""); startCamera(); }}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </>
+        ) : cam.isActive ? (
+          <>
+            <video ref={videoRef} className="w-full aspect-[4/3] object-cover bg-black" playsInline muted autoPlay />
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+              <button
+                onClick={handleProductCapture}
+                className="h-14 w-14 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+              >
+                <div className="h-12 w-12 rounded-full border-4 border-gray-300 flex items-center justify-center">
+                  <Camera className="h-5 w-5 text-gray-700" />
+                </div>
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="aspect-[4/3] flex flex-col items-center justify-center gap-3 text-muted-foreground p-6">
+            <Camera className="h-10 w-10 opacity-30" />
+            <p className="text-sm text-center">Сфотографируйте товар<br />или загрузите фото из галереи</p>
+            {cam.error && <p className="text-xs text-destructive">{cam.error}</p>}
+          </div>
+        )}
+      </div>
+
+      {!productPhotoUrl && (
+        <div className="grid grid-cols-2 gap-3">
+          <Button className="gap-2" onClick={startCamera} disabled={cam.isActive}>
+            <Camera className="h-4 w-4" /> Камера
+          </Button>
+          <Button variant="outline" className="gap-2" onClick={() => fileInputRef.current?.click()}>
+            <Upload className="h-4 w-4" /> Галерея
+          </Button>
+        </div>
       )}
+
+      {!productLoading && (
+        <div className="space-y-3">
+          <Input
+            value={productName}
+            onChange={(e) => setProductName(e.target.value)}
+            placeholder={productPhotoUrl ? "Проверьте или исправьте название" : "Или введите название вручную"}
+          />
+          <Button
+            className="w-full gap-2 h-12"
+            onClick={confirmProduct}
+            disabled={!productName.trim()}
+          >
+            Дальше — ценник <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
+      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleProductFileUpload} />
+    </div>
+  );
+
+  // ─── STEP: PRICE PHOTO ────────────────────────────────────────────────────
+
+  if (step === "price_photo") return (
+    <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
+      <div className="flex items-center gap-3">
+        <Button
+          variant="ghost" size="icon"
+          onClick={() => { resetCam(); setStep(selectedProduct?.barcode ? "barcode" : "product_photo"); }}
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+        <div className="flex-1">
+          <h1 className="font-bold">Фото ценника</h1>
+          <p className="text-xs text-muted-foreground">Шаг 3 — AI считает цену</p>
+        </div>
+      </div>
+      <ProgressBar value={progress} />
+
+      {/* Product chip */}
+      {selectedProduct && (
+        <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-primary/10 border border-primary/20">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold truncate">{selectedProduct.name}</p>
+            {selectedProduct.barcode && (
+              <p className="text-xs font-mono text-muted-foreground">{selectedProduct.barcode}</p>
+            )}
+          </div>
+          {productExtra?.source && (
+            <span className="text-xs text-primary px-2 py-0.5 rounded-full bg-primary/15 flex-shrink-0">
+              {productExtra.source}
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="rounded-xl border bg-card overflow-hidden relative">
+        {pricePhotoUrl ? (
+          <>
+            <img src={pricePhotoUrl} alt="ценник" className="w-full aspect-[4/3] object-cover" />
+            {priceLoading ? (
+              <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
+                <Loader2 className="h-8 w-8 animate-spin text-white" />
+                <p className="text-white text-sm font-medium">AI читает цену...</p>
+              </div>
+            ) : (
+              <Button
+                variant="ghost" size="icon"
+                className="absolute top-2 right-2 bg-black/50 text-white hover:bg-black/70"
+                onClick={() => { setPricePhotoUrl(null); setPrice(""); startCamera(); }}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </>
+        ) : cam.isActive ? (
+          <>
+            <video ref={videoRef} className="w-full aspect-[4/3] object-cover bg-black" playsInline muted autoPlay />
+            {/* Price tag target frame */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="border-2 border-white/70 rounded-xl w-3/4 h-2/5 flex items-center justify-center">
+                <Tag className="h-5 w-5 text-white/50" />
+              </div>
+            </div>
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
+              <button
+                onClick={handlePriceCapture}
+                className="h-14 w-14 rounded-full bg-white shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+              >
+                <div className="h-12 w-12 rounded-full border-4 border-gray-300 flex items-center justify-center">
+                  <Camera className="h-5 w-5 text-gray-700" />
+                </div>
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="aspect-[4/3] flex flex-col items-center justify-center gap-3 text-muted-foreground p-6">
+            <Tag className="h-10 w-10 opacity-30" />
+            <p className="text-sm text-center">Наведите камеру на ценник<br />или введите цену вручную</p>
+            {cam.error && <p className="text-xs text-destructive">{cam.error}</p>}
+          </div>
+        )}
+      </div>
+
+      {!pricePhotoUrl && (
+        <div className="grid grid-cols-2 gap-3">
+          <Button className="gap-2" onClick={startCamera} disabled={cam.isActive}>
+            <Camera className="h-4 w-4" /> Камера
+          </Button>
+          <Button variant="outline" className="gap-2" onClick={() => priceFileInputRef.current?.click()}>
+            <Upload className="h-4 w-4" /> Галерея
+          </Button>
+        </div>
+      )}
+
+      {!priceLoading && (
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            <Input
+              type="number"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="Цена (авто или вручную)"
+              className="text-xl font-bold flex-1"
+              step="0.01" min="0"
+            />
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="border rounded-md px-3 bg-background text-sm font-medium"
+            >
+              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <Button className="w-full gap-2 h-12" onClick={() => setStep("store")} disabled={!price}>
+            Дальше — выбрать магазин <ChevronRight className="h-4 w-4" />
+          </Button>
+          {!price && (
+            <Button variant="ghost" className="w-full text-sm text-muted-foreground" onClick={() => setStep("store")}>
+              Пропустить — укажу цену позже
+            </Button>
+          )}
+        </div>
+      )}
+
+      <input ref={priceFileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePriceFileUpload} />
     </div>
   );
 
@@ -605,292 +687,223 @@ export default function AddPricePage() {
   if (step === "store") return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => { setNewStoreMode(false); setStep("product"); }}><ArrowLeft className="h-5 w-5" /></Button>
-        <div>
+        <Button variant="ghost" size="icon" onClick={() => { setNewStoreMode(false); setStep("price_photo"); }}>
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+        <div className="flex-1">
           <h1 className="font-bold">{newStoreMode ? "Новый магазин" : "Выбрать магазин"}</h1>
-          <p className="text-xs text-muted-foreground">Шаг 3 из 4 — {selectedProduct?.name}</p>
+          <p className="text-xs text-muted-foreground">Шаг 4 — где купили?</p>
         </div>
       </div>
+      <ProgressBar value={progress} />
 
-      {selectedProduct && (
-        <div className="rounded-xl border bg-card overflow-hidden">
-          {selectedProduct.imageUrl && (
-            <img
-              src={selectedProduct.imageUrl}
-              alt={selectedProduct.name}
-              className="w-full h-48 object-contain bg-white border-b"
-            />
-          )}
-          <div className="p-3 space-y-1">
-            <p className="font-bold text-base leading-snug">{selectedProduct.name}</p>
-            {selectedProduct.brand && (
-              <p className="text-sm text-muted-foreground">{selectedProduct.brand}</p>
-            )}
-            <div className="flex flex-wrap gap-2 mt-1">
-              {productExtra?.quantity && (
-                <span className="text-xs bg-muted px-2 py-0.5 rounded-full">{productExtra.quantity}</span>
-              )}
-              {productExtra?.categoryHint && (
-                <span className="text-xs bg-muted px-2 py-0.5 rounded-full capitalize">{productExtra.categoryHint}</span>
-              )}
-              {selectedProduct.barcode && (
-                <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded-full">{selectedProduct.barcode}</span>
-              )}
-              {productExtra?.source && (
-                <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{productExtra.source}</span>
-              )}
-            </div>
-            {productExtra?.description && (
-              <p className="text-xs text-muted-foreground mt-1 line-clamp-3 leading-relaxed">
-                <span className="font-medium">Состав: </span>{productExtra.description}
-              </p>
-            )}
-            {productExtra?.autoPrice != null && (
-              <div className="flex items-center gap-1.5 mt-1 pt-1 border-t">
-                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
-                  {productExtra.autoPriceStore}: {productExtra.autoPricePromo ?? productExtra.autoPrice} ₽
-                </span>
-                {productExtra.autoPricePromo != null && (
-                  <span className="text-xs line-through text-muted-foreground">{productExtra.autoPrice} ₽</span>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {!newStoreMode && (
+        <>
+          {/* GPS button */}
+          <Button variant="outline" className="w-full gap-2" onClick={detectGpsCity} disabled={gpsLoading}>
+            {gpsLoading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <MapPin className="h-4 w-4 text-primary" />}
+            {gpsCity ? `Рядом с ${gpsCity}` : "Определить моё местоположение"}
+          </Button>
 
-      {newStoreMode ? (
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Название магазина</label>
-            <Input
-              placeholder="Например: Пятёрочка, Магнит..."
-              value={newStoreName}
-              onChange={(e) => setNewStoreName(e.target.value)}
-              autoFocus
-            />
-          </div>
-
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Город</label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Поиск города..."
-                value={newStoreCity ? newStoreCity.name : newStoreCityQ}
-                onChange={(e) => { setNewStoreCityQ(e.target.value); setNewStoreCity(null); }}
-                className="pl-9"
-              />
-            </div>
-
-            {newStoreCityResults.length > 0 && !newStoreCity && (
-              <div className="mt-1 border rounded-lg overflow-hidden">
-                {newStoreCityResults.map((c) => (
+          {/* Quick chain buttons */}
+          {gpsCity && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Быстрый выбор</p>
+              <div className="flex flex-wrap gap-2">
+                {QUICK_CHAINS.map((chain) => (
                   <button
-                    key={c.id}
-                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent/30 text-left text-sm"
-                    onClick={() => { setNewStoreCity(c); setNewStoreCityQ(c.name); setNewStoreCityResults([]); }}
+                    key={chain}
+                    className="px-3 py-1.5 rounded-xl border text-sm font-medium hover:bg-primary hover:text-primary-foreground hover:border-primary transition-colors"
+                    onClick={() => selectQuickChain(chain)}
                   >
-                    <span>{c.country.flagEmoji}</span>
-                    <span className="font-medium">{c.name}</span>
-                    <span className="text-muted-foreground text-xs">{c.country.name}</span>
+                    {chain}
                   </button>
                 ))}
               </div>
-            )}
+            </div>
+          )}
 
-            {newStoreCityQ.length >= 2 && newStoreCityResults.length === 0 && !newStoreCity && (
-              <p className="text-xs text-muted-foreground mt-1">Город не найден в базе. Попробуйте по-английски (Moscow, Kazan...)</p>
-            )}
-
-            {newStoreCity && (
-              <p className="text-xs text-emerald-500 mt-1">
-                {newStoreCity.country.flagEmoji} {newStoreCity.name}, {newStoreCity.country.name}
-              </p>
-            )}
+          <div className="flex items-center gap-2">
+            <div className="flex-1 border-t" />
+            <span className="text-xs text-muted-foreground">или поиск по базе</span>
+            <div className="flex-1 border-t" />
           </div>
 
-          <div className="flex gap-2 pt-1">
-            <Button variant="outline" className="flex-1" onClick={() => setNewStoreMode(false)}>Отмена</Button>
-            <Button className="flex-1" onClick={confirmNewStore}>Подтвердить</Button>
-          </div>
-        </div>
-      ) : (
-        <>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Пят... → Пятёрочка, Магнит..."
+              placeholder="Пятёрочка, Магнит, ВкусВилл..."
               value={storeQuery}
               onChange={(e) => setStoreQuery(e.target.value)}
               className="pl-9"
-              autoFocus
+              autoFocus={!gpsCity}
             />
           </div>
 
-          <div className="space-y-1 max-h-64 overflow-y-auto">
+          <div className="space-y-1 max-h-56 overflow-y-auto">
             {storeResults.map((s) => (
               <button
                 key={s.id}
-                className="w-full flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/30 transition-colors text-left"
+                className="w-full flex items-center gap-3 p-3 rounded-xl border bg-card hover:bg-accent/30 transition-colors text-left"
                 onClick={() => selectStore(s)}
               >
-                <div className="h-10 w-10 rounded bg-muted flex items-center justify-center text-lg flex-shrink-0">🏪</div>
+                <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center text-base flex-shrink-0">🏪</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{s.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {s.city.name} {s.city.country.flagEmoji}
-                    {s.address && ` · ${s.address}`}
-                  </p>
+                  <p className="text-xs text-muted-foreground">{s.city.name} {s.city.country.flagEmoji}</p>
                 </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
               </button>
             ))}
           </div>
 
           {storeQuery.length >= 2 && storeResults.length === 0 && (
-            <div className="text-center py-2 space-y-3">
-              <p className="text-sm text-muted-foreground">Магазин «{storeQuery}» не найден</p>
-              <Button className="gap-2" onClick={enterNewStoreMode}>
-                <Plus className="h-4 w-4" /> Создать новый магазин
+            <div className="text-center py-3 space-y-2">
+              <p className="text-sm text-muted-foreground">Магазин не найден в базе</p>
+              <Button className="gap-2" onClick={() => { setNewStoreName(storeQuery); setNewStoreMode(true); }}>
+                <Plus className="h-4 w-4" /> Добавить «{storeQuery}»
               </Button>
             </div>
           )}
         </>
       )}
+
+      {newStoreMode && (
+        <div className="space-y-3">
+          <Input
+            placeholder="Название магазина"
+            value={newStoreName}
+            onChange={(e) => setNewStoreName(e.target.value)}
+            autoFocus
+          />
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Город..."
+              value={newStoreCity ? newStoreCity.name : newStoreCityQ}
+              onChange={(e) => { setNewStoreCityQ(e.target.value); setNewStoreCity(null); }}
+              className="pl-9"
+            />
+          </div>
+          {newStoreCityResults.length > 0 && !newStoreCity && (
+            <div className="border rounded-xl overflow-hidden">
+              {newStoreCityResults.map((c) => (
+                <button
+                  key={c.id}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-accent/30 text-left text-sm"
+                  onClick={() => { setNewStoreCity(c); setNewStoreCityQ(c.name); setNewStoreCityResults([]); }}
+                >
+                  <span>{c.country.flagEmoji}</span>
+                  <span className="font-medium">{c.name}</span>
+                  <span className="text-muted-foreground text-xs">{c.country.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" className="flex-1" onClick={() => setNewStoreMode(false)}>Назад</Button>
+            <Button className="flex-1" onClick={confirmNewStore}>Подтвердить</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 
-  // ─── STEP: PRICE ──────────────────────────────────────────────────────────
+  // ─── STEP: CONFIRM ────────────────────────────────────────────────────────
 
-  if (step === "price") return (
+  if (step === "confirm") return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => setStep("store")}><ArrowLeft className="h-5 w-5" /></Button>
-        <div>
-          <h1 className="font-bold">Введите цену</h1>
-          <p className="text-xs text-muted-foreground">Шаг 4 из 4</p>
+        <Button variant="ghost" size="icon" onClick={() => setStep("store")}>
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+        <div className="flex-1">
+          <h1 className="font-bold">Всё верно?</h1>
+          <p className="text-xs text-muted-foreground">Шаг 5 — публикуем</p>
         </div>
       </div>
+      <ProgressBar value={progress} />
 
-      {/* Product summary card */}
       <div className="rounded-xl border bg-card overflow-hidden">
-        {selectedProduct?.imageUrl && (
-          <img src={selectedProduct.imageUrl} alt="" className="w-full h-48 object-contain bg-white border-b" />
+        {(productPhotoUrl ?? selectedProduct?.imageUrl) && (
+          <img
+            src={productPhotoUrl ?? selectedProduct?.imageUrl ?? ""}
+            alt=""
+            className="w-full h-44 object-cover border-b"
+          />
         )}
-        {cam.capturedUrl && !selectedProduct?.imageUrl && (
-          <img src={cam.capturedUrl} alt="" className="w-full h-32 object-cover border-b" />
-        )}
-        <div className="p-3 space-y-1.5">
-          <p className="font-bold text-base">{selectedProduct?.name}</p>
-          {selectedProduct?.brand && (
-            <p className="text-sm text-muted-foreground">{selectedProduct.brand}</p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {productExtra?.quantity && (
-              <span className="text-xs bg-muted px-2 py-0.5 rounded-full">{productExtra.quantity}</span>
-            )}
-            {productExtra?.categoryHint && (
-              <span className="text-xs bg-muted px-2 py-0.5 rounded-full capitalize">{productExtra.categoryHint}</span>
+        <div className="p-4 space-y-4">
+          {/* Product */}
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium mb-1">Товар</p>
+            <input
+              value={selectedProduct?.name ?? ""}
+              onChange={(e) => setSelectedProduct((prev) => prev ? { ...prev, name: e.target.value } : prev)}
+              className="w-full font-bold text-base bg-transparent border-0 outline-none p-0 leading-snug"
+            />
+            {selectedProduct?.brand && (
+              <p className="text-sm text-muted-foreground mt-0.5">{selectedProduct.brand}</p>
             )}
             {selectedProduct?.barcode && (
-              <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded-full">{selectedProduct.barcode}</span>
-            )}
-            {productExtra?.source && (
-              <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">{productExtra.source}</span>
+              <p className="text-xs font-mono text-muted-foreground mt-0.5">{selectedProduct.barcode}</p>
             )}
           </div>
-          {productExtra?.description && (
-            <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-              <span className="font-medium">Состав: </span>{productExtra.description}
-            </p>
-          )}
-          <div className="border-t pt-2 mt-1 flex justify-between text-sm">
-            <span className="text-muted-foreground">Магазин</span>
-            <span className="font-medium">{selectedStore?.name}, {selectedStore?.city.name} {selectedStore?.city.country.flagEmoji}</span>
-          </div>
-        </div>
-      </div>
 
-      {/* Store price lookup — auto-triggered when store is selected; button is retry */}
-      {!aiPriceLoading && (
-        <Button variant="outline" className="w-full gap-2" onClick={handleAiPriceLookup}>
-          <Sparkles className="h-4 w-4 text-primary" />
-          {aiPriceResult ? `Обновить цену · ${selectedStore?.name}` : `Найти цену на сайте ${selectedStore?.name}`}
-        </Button>
-      )}
+          <div className="border-t" />
 
-      {aiPriceLoading && (
-        <div className="flex items-center gap-3 p-3 rounded-xl border text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin text-primary flex-shrink-0" />
-          Ищу цену на сайте {selectedStore?.name}...
-        </div>
-      )}
-
-      {aiPriceResult && aiPriceResult.found && (
-        <div className="rounded-xl border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-bold text-emerald-700 dark:text-emerald-400 text-lg">
-                {aiPriceResult.pricePromo ?? aiPriceResult.price} ₽
-                {aiPriceResult.pricePromo && (
-                  <span className="text-sm font-normal line-through text-muted-foreground ml-2">{aiPriceResult.price} ₽</span>
-                )}
-              </p>
-              <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-0.5">
-                {aiPriceResult.storeDisplayName} · цена с сайта
-              </p>
+          {/* Price */}
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium mb-1">Цена</p>
+            <div className="flex items-baseline gap-2">
+              <input
+                type="number"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                placeholder="0.00"
+                className="text-3xl font-bold bg-transparent border-0 outline-none p-0 w-36"
+                step="0.01" min="0"
+              />
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                className="border rounded-md px-2 py-1 bg-background text-sm font-medium"
+              >
+                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
-            {aiPriceResult.productUrl && (
-              <a href={aiPriceResult.productUrl} target="_blank" rel="noopener noreferrer">
-                <Button size="sm" variant="outline" className="gap-1">
-                  <ExternalLink className="h-3 w-3" /> Сайт
-                </Button>
-              </a>
-            )}
           </div>
-          {aiPriceResult.productName && (
-            <p className="text-xs text-muted-foreground truncate">{aiPriceResult.productName}</p>
+
+          <div className="border-t" />
+
+          {/* Store */}
+          <div>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium mb-1">Магазин</p>
+            <p className="text-sm font-semibold">{selectedStore?.name}</p>
+            <p className="text-xs text-muted-foreground">{selectedStore?.city.name} {selectedStore?.city.country.flagEmoji}</p>
+          </div>
+
+          {pricePhotoUrl && (
+            <>
+              <div className="border-t" />
+              <div className="flex items-center gap-3">
+                <img src={pricePhotoUrl} alt="ценник" className="h-14 w-20 object-cover rounded-lg border" />
+                <p className="text-xs text-muted-foreground">Фото ценника прикреплено</p>
+              </div>
+            </>
           )}
-        </div>
-      )}
-
-      {aiPriceResult && !aiPriceResult.found && (
-        <div className="rounded-xl border border-orange-200 bg-orange-50 dark:bg-orange-950/20 p-3 flex items-center justify-between">
-          <p className="text-sm text-orange-700 dark:text-orange-400">Цена не найдена автоматически</p>
-          <a href={aiPriceResult.searchUrl} target="_blank" rel="noopener noreferrer">
-            <Button size="sm" variant="outline" className="gap-1">
-              <ExternalLink className="h-3 w-3" /> Яндекс
-            </Button>
-          </a>
-        </div>
-      )}
-
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Цена</label>
-        <div className="flex gap-2">
-          <Input
-            type="number"
-            placeholder="0.00"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            className="text-xl font-bold"
-            step="0.01"
-            min="0"
-            autoFocus
-          />
-          <select
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-            className="border rounded-md px-3 bg-background text-sm font-medium"
-          >
-            {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
         </div>
       </div>
 
-      <Button className="w-full h-12 text-base" onClick={handlePublish} disabled={publishing || !price}>
-        {publishing ? <Loader2 className="h-5 w-5 animate-spin" /> : "Опубликовать цену"}
+      <Button
+        className="w-full h-14 text-base font-bold gap-2"
+        onClick={handlePublish}
+        disabled={publishing || !price || !selectedStore || !selectedProduct}
+      >
+        {publishing
+          ? <><Loader2 className="h-5 w-5 animate-spin" /> Публикуем...</>
+          : <><CheckCircle className="h-5 w-5" /> Опубликовать цену</>}
       </Button>
     </div>
   );
@@ -898,27 +911,17 @@ export default function AddPricePage() {
   // ─── STEP: DONE ───────────────────────────────────────────────────────────
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-20 flex flex-col items-center gap-4 text-center">
-      <CheckCircle className="h-16 w-16 text-emerald-400" />
-      <h2 className="text-xl font-bold">Цена опубликована!</h2>
-      <p className="text-muted-foreground text-sm">Спасибо за вклад. Ваша цена проходит проверку.</p>
+    <div className="max-w-lg mx-auto px-4 py-16 flex flex-col items-center gap-4 text-center">
+      <div className="h-20 w-20 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+        <CheckCircle className="h-10 w-10 text-emerald-500" />
+      </div>
+      <h2 className="text-2xl font-bold">Цена опубликована!</h2>
+      <p className="text-muted-foreground text-sm">
+        {price} {currency} в «{selectedStore?.name}» · {selectedStore?.city.name}
+      </p>
       <div className="flex gap-3 mt-4">
         <Button variant="outline" onClick={() => navigate("/")}>На главную</Button>
-        <Button onClick={() => {
-          resetCam();
-          setStep("photo");
-          setSelectedProduct(null);
-          setSelectedStore(null);
-          setPrice("");
-          setAiResult(null);
-          setProductExtra(null);
-          setAiPriceResult(null);
-          setProductQuery("");
-          setStoreQuery("");
-          setNewStoreMode(false);
-        }}>
-          Добавить ещё
-        </Button>
+        <Button onClick={resetAll}>Добавить ещё</Button>
       </div>
     </div>
   );
