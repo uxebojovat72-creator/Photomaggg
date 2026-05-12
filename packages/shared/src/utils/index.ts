@@ -84,6 +84,14 @@ export function formatRelativeDate(dateStr: string, locale = "en"): string {
   const diffHour = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHour / 24);
 
+  if (locale === "ru") {
+    if (diffMin < 1) return "только что";
+    if (diffMin < 60) return `${diffMin} мин. назад`;
+    if (diffHour < 24) return `${diffHour} ч. назад`;
+    if (diffDay < 7) return `${diffDay} д. назад`;
+    return date.toLocaleDateString("ru-RU");
+  }
+
   if (diffMin < 1) return "just now";
   if (diffMin < 60) return `${diffMin}m ago`;
   if (diffHour < 24) return `${diffHour}h ago`;

@@ -27,11 +27,17 @@ interface ProductWithPrices {
 
 interface PricePoint {
   date: string;
+  price: number;
   priceUsd: number;
+  currencyCode: string;
   storeName: string;
 }
 
-const PERIOD_LABELS: Record<Days, string> = { 7: "7d", 30: "30d", 90: "90d" };
+const PERIOD_LABELS: Record<Days, string> = { 7: "7д", 30: "30д", 90: "90д" };
+
+function fmtPrice(price: number, currency = "RUB") {
+  return formatPrice(price, currency, "ru-RU");
+}
 
 export default function ProductPage() {
   const { id } = useParams<{ id: string }>();
@@ -72,13 +78,14 @@ export default function ProductPage() {
   );
 
   const approvedPrices = product.prices?.filter((p) => p.status === "approved") ?? [];
-  const usdPrices = approvedPrices.map((p) => Number(p.priceUsd ?? p.price)).filter(Boolean);
-  const minUsd = usdPrices.length ? Math.min(...usdPrices) : null;
-  const maxUsd = usdPrices.length ? Math.max(...usdPrices) : null;
+  const rubPrices = approvedPrices.map((p) => Number(p.price)).filter(Boolean);
+  const minPrice = rubPrices.length ? Math.min(...rubPrices) : null;
+  const maxPrice = rubPrices.length ? Math.max(...rubPrices) : null;
+  const avgPrice = rubPrices.length ? rubPrices.reduce((a, b) => a + b, 0) / rubPrices.length : null;
 
   const chartData = history.map((p) => ({
     date: new Date(p.date).toLocaleDateString("ru", { month: "short", day: "numeric" }),
-    price: p.priceUsd,
+    price: p.price ?? p.priceUsd,
   }));
 
   return (
@@ -101,21 +108,19 @@ export default function ProductPage() {
       </div>
 
       {/* Price stats */}
-      {usdPrices.length > 0 && (
+      {rubPrices.length > 0 && (
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-lg border bg-card p-3 text-center">
             <p className="text-xs text-muted-foreground">Мин. цена</p>
-            <p className="font-bold text-emerald-400">{formatPrice(minUsd!, "USD")}</p>
+            <p className="font-bold text-emerald-400">{fmtPrice(minPrice!)}</p>
           </div>
           <div className="rounded-lg border bg-card p-3 text-center">
             <p className="text-xs text-muted-foreground">Ср. цена</p>
-            <p className="font-bold">
-              {formatPrice(usdPrices.reduce((a, b) => a + b, 0) / usdPrices.length, "USD")}
-            </p>
+            <p className="font-bold">{fmtPrice(avgPrice!)}</p>
           </div>
           <div className="rounded-lg border bg-card p-3 text-center">
             <p className="text-xs text-muted-foreground">Макс. цена</p>
-            <p className="font-bold text-red-400">{formatPrice(maxUsd!, "USD")}</p>
+            <p className="font-bold text-red-400">{fmtPrice(maxPrice!)}</p>
           </div>
         </div>
       )}
@@ -144,10 +149,10 @@ export default function ProductPage() {
             <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+              <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} tickFormatter={(v) => `${v} ₽`} />
               <Tooltip
                 contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
-                formatter={(v: number) => [formatPrice(v, "USD"), "Цена"]}
+                formatter={(v: number) => [fmtPrice(v), "Цена"]}
               />
               <Line type="monotone" dataKey="price" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
             </LineChart>
@@ -176,7 +181,7 @@ export default function ProductPage() {
           </div>
         ) : (
           [...approvedPrices]
-            .sort((a, b) => Number(a.priceUsd ?? a.price) - Number(b.priceUsd ?? b.price))
+            .sort((a, b) => Number(a.price) - Number(b.price))
             .map((price, idx) => (
               <div key={price.id} className={`flex items-center gap-3 p-3 rounded-lg border bg-card ${idx === 0 ? "border-emerald-500/50" : ""}`}>
                 {idx === 0 && <TrendingDown className="h-4 w-4 text-emerald-400 flex-shrink-0" />}
@@ -191,16 +196,13 @@ export default function ProductPage() {
                       {(price as unknown as { store: { city: { name: string; country: { flagEmoji: string } } } }).store?.city?.name}
                       {" "}{(price as unknown as { store: { city: { country: { flagEmoji: string } } } }).store?.city?.country?.flagEmoji}
                     </span>
-                    <span className="text-xs text-muted-foreground ml-auto">{formatRelativeDate(price.createdAt)}</span>
+                    <span className="text-xs text-muted-foreground ml-auto">{formatRelativeDate(price.createdAt, "ru")}</span>
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className={`font-bold ${idx === 0 ? "text-emerald-400" : ""}`}>
-                    {formatPrice(Number(price.price), price.currencyCode)}
+                    {fmtPrice(Number(price.price), price.currencyCode ?? "RUB")}
                   </p>
-                  {price.priceUsd && price.currencyCode !== "USD" && (
-                    <p className="text-xs text-muted-foreground">≈ {formatPrice(Number(price.priceUsd), "USD")}</p>
-                  )}
                 </div>
               </div>
             ))
