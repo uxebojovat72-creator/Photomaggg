@@ -333,7 +333,9 @@ export default function AddPricePage() {
       city: {
         id: newStoreCity?.id ?? "__new__",
         name: cityName,
-        country: newStoreCity?.country ?? { id: "__new__", name: "Россия", code: "RU", flagEmoji: "🇷🇺" },
+        country: newStoreCity
+          ? { ...newStoreCity.country, flagEmoji: newStoreCity.country.flagEmoji ?? "" }
+          : { id: "__new__", name: "Россия", code: "RU", flagEmoji: "🇷🇺" },
       },
     });
     setNewStoreMode(false);
