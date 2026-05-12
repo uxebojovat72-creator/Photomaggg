@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { pricesApi } from "@/api/prices.api";
 import { storesApi, type StoreResult } from "@/api/stores.api";
 import { formatPrice } from "@priceradar/shared";
+import { STORE_CHAINS, CATEGORY_LABELS, type StoreChain } from "@/lib/stores-list";
 
 type Step = "capture" | "scanning" | "review" | "store" | "publishing" | "done";
 
@@ -22,7 +23,11 @@ function fmtPrice(price: number) {
   return formatPrice(price, "RUB", "ru-RU");
 }
 
-const QUICK_STORES = ["Пятёрочка", "Магнит", "ВкусВилл", "Перекрёсток", "Лента", "Ашан", "Дикси"];
+// Group stores by category for the UI
+const STORE_BY_CATEGORY = (Object.keys(CATEGORY_LABELS) as StoreChain["category"][]).map((cat) => ({
+  label: CATEGORY_LABELS[cat],
+  stores: STORE_CHAINS.filter((s) => s.category === cat).map((s) => s.name),
+}));
 
 export default function ReceiptScanPage() {
   const navigate = useNavigate();
@@ -32,7 +37,7 @@ export default function ReceiptScanPage() {
 
   const [step, setStep] = useState<Step>("capture");
   const [items, setItems] = useState<ReceiptItem[]>([]);
-  const [detectedStore, setDetectedStore] = useState<string | null>(null);
+  // detectedStore removed — user always selects manually
   const [result, setResult] = useState<{ created: number; failed: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,9 +94,7 @@ export default function ReceiptScanPage() {
         setStep("capture");
         return;
       }
-      setDetectedStore(data.storeName);
       setItems(data.items.map((item, i) => ({ ...item, id: i, enabled: true, editing: false })));
-      if (data.storeName) setStoreQuery(data.storeName);
       setStep("review");
     } catch {
       setError("Ошибка распознавания. Попробуйте ещё раз.");
@@ -220,7 +223,7 @@ export default function ReceiptScanPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-bold">Найдено товаров: {items.length}</h2>
-          {detectedStore && <p className="text-sm text-muted-foreground">Магазин: {detectedStore}</p>}
+          <p className="text-sm text-muted-foreground">Выберите магазин на следующем шаге</p>
         </div>
         <Button
           variant="outline"
@@ -299,17 +302,26 @@ export default function ReceiptScanPage() {
         <p className="text-sm text-muted-foreground">Куда публикуем {enabledCount} цен?</p>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {QUICK_STORES.map((name) => (
-          <button
-            key={name}
-            onClick={() => { setStoreQuery(name); setSelectedStore(null); setStoreSuggestions([]); }}
-            className={`px-3 py-1 rounded-full text-sm border transition-colors ${
-              storeQuery === name && !selectedStore ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
-            }`}
-          >
-            {name}
-          </button>
+      <div className="space-y-3 max-h-48 overflow-y-auto pr-1">
+        {STORE_BY_CATEGORY.map((group) => (
+          <div key={group.label}>
+            <p className="text-xs text-muted-foreground font-medium mb-1.5">{group.label}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {group.stores.map((name) => (
+                <button
+                  key={name}
+                  onClick={() => { setStoreQuery(name); setSelectedStore(null); setStoreSuggestions([]); }}
+                  className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                    storeQuery === name && !selectedStore
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border hover:bg-accent"
+                  }`}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
 

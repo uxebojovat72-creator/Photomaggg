@@ -75,6 +75,16 @@ await fastify.register(aiRoutes, { prefix: "/ai" });
 await fastify.register(currencyRoutes, { prefix: "/currencies" });
 await fastify.register(favoritesRoutes, { prefix: "/favorites" });
 
+// Enable pg_trgm for fuzzy product search (idempotent)
+try {
+  await prisma.$executeRawUnsafe("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+  await prisma.$executeRawUnsafe(
+    "CREATE INDEX IF NOT EXISTS products_name_trgm_idx ON products USING GIN (name gin_trgm_ops)"
+  );
+} catch (e) {
+  fastify.log.warn("pg_trgm setup skipped: " + (e instanceof Error ? e.message : e));
+}
+
 // Health check
 fastify.get("/health", async () => ({
   status: "ok",

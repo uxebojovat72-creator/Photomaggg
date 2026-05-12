@@ -15,13 +15,17 @@ import { productsApi } from "@/api/products.api";
 import { storesApi, type StoreResult } from "@/api/stores.api";
 import { geoApi, type City } from "@/api/geo.api";
 import { toast } from "@/hooks/useToast";
+import { STORE_CHAINS, CATEGORY_LABELS, type StoreChain } from "@/lib/stores-list";
 import type { Product } from "@priceradar/shared";
 
-type Step = "barcode" | "product_photo" | "price_photo" | "store" | "confirm" | "done";
+type Step = "barcode" | "product_photo" | "pick_product" | "price_photo" | "store" | "confirm" | "done";
 
 const NEW_PRODUCT_ID = "__new__";
 const CURRENCIES = ["RUB", "USD", "EUR", "GBP", "KZT", "TRY"];
-const QUICK_CHAINS = ["Пятёрочка", "Магнит", "ВкусВилл", "Перекрёсток", "Лента", "Дикси", "Ашан"];
+const STORE_BY_CATEGORY = (Object.keys(CATEGORY_LABELS) as StoreChain["category"][]).map((cat) => ({
+  label: CATEGORY_LABELS[cat],
+  stores: STORE_CHAINS.filter((s) => s.category === cat).map((s) => s.name),
+}));
 
 const SOURCE_LABELS: Record<string, string> = {
   local: "база данных", "5ka": "Пятёрочка", perekrestok: "Перекрёсток",
@@ -31,7 +35,7 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 const STEP_PROGRESS: Record<Step, number> = {
-  barcode: 15, product_photo: 35, price_photo: 60, store: 80, confirm: 95, done: 100,
+  barcode: 15, product_photo: 35, pick_product: 50, price_photo: 60, store: 80, confirm: 95, done: 100,
 };
 
 function ProgressBar({ value }: { value: number }) {
@@ -89,6 +93,9 @@ export default function AddPricePage() {
   const [gpsLoading, setGpsLoading] = useState(false);
 
   const [publishing, setPublishing] = useState(false);
+  const [scannedBarcode, setScannedBarcode] = useState<string | null>(null);
+  const [dupCandidates, setDupCandidates] = useState<Array<{ id: string; name: string; brand: string | null; imageUrl: string | null; similarity: number }>>([]);
+  const [dupChecking, setDupChecking] = useState(false);
 
   const debouncedSQ = useDebounce(storeQuery, 300);
   const debouncedCityQ = useDebounce(newStoreCityQ, 300);
@@ -164,6 +171,7 @@ export default function AddPricePage() {
         setStep("price_photo");
       })
       .catch(() => {
+        setScannedBarcode(barcode.result!);
         setBarcodeError("Не найден в базе — сфотографируйте этикетку");
       })
       .finally(() => setBarcodeLoading(false));
@@ -209,9 +217,31 @@ export default function AddPricePage() {
       if (result.name && result.provider !== "manual") {
         setProductName(result.name);
         setProductBrand(result.brand ?? null);
+        // Level 3: check for duplicates after AI recognition
+        checkDuplicates(result.name, scannedBarcode ?? undefined);
       }
     } catch { /* silent */ } finally {
       setProductLoading(false);
+    }
+  };
+
+  const checkDuplicates = async (name: string, barcode?: string) => {
+    setDupChecking(true);
+    setDupCandidates([]);
+    try {
+      const res = await productsApi.checkDuplicate({ name, barcode });
+      if (res.exact) {
+        // Perfect match — auto-select silently
+        setSelectedProduct({
+          id: res.exact.id, name: res.exact.name, brand: res.exact.brand,
+          barcode: res.exact.barcode, categoryId: null, imageUrl: res.exact.imageUrl,
+          aiGenerated: false, aiConfirmed: true, aliases: [], createdBy: "", createdAt: "",
+        });
+      } else if (res.similar.length > 0) {
+        setDupCandidates(res.similar);
+      }
+    } catch { /* silent */ } finally {
+      setDupChecking(false);
     }
   };
 
@@ -249,11 +279,25 @@ export default function AddPricePage() {
   };
 
   const confirmProduct = () => {
+    // If already auto-resolved (exact match), skip pick_product
+    if (selectedProduct && selectedProduct.id !== NEW_PRODUCT_ID) {
+      resetCam();
+      setPricePhotoUrl(null);
+      setStep("price_photo");
+      return;
+    }
+    // If fuzzy candidates found — show pick_product step
+    if (dupCandidates.length > 0 && !dupChecking) {
+      resetCam();
+      setStep("pick_product");
+      return;
+    }
+    // No candidates — create new
     setSelectedProduct({
       id: NEW_PRODUCT_ID,
       name: productName.trim(),
       brand: productBrand,
-      barcode: null,
+      barcode: scannedBarcode,
       categoryId: null,
       imageUrl: null,
       aiGenerated: true,
@@ -263,6 +307,28 @@ export default function AddPricePage() {
       createdAt: new Date().toISOString(),
     });
     resetCam();
+    setPricePhotoUrl(null);
+    setStep("price_photo");
+  };
+
+  const pickExistingProduct = (p: { id: string; name: string; brand: string | null; imageUrl: string | null }) => {
+    setSelectedProduct({
+      id: p.id, name: p.name, brand: p.brand, barcode: scannedBarcode,
+      categoryId: null, imageUrl: p.imageUrl, aiGenerated: false, aiConfirmed: true,
+      aliases: [], createdBy: "", createdAt: "",
+    });
+    setDupCandidates([]);
+    setPricePhotoUrl(null);
+    setStep("price_photo");
+  };
+
+  const createNewProduct = () => {
+    setSelectedProduct({
+      id: NEW_PRODUCT_ID, name: productName.trim(), brand: productBrand,
+      barcode: scannedBarcode, categoryId: null, imageUrl: null,
+      aiGenerated: true, aiConfirmed: false, aliases: [], createdBy: "", createdAt: "",
+    });
+    setDupCandidates([]);
     setPricePhotoUrl(null);
     setStep("price_photo");
   };
@@ -551,6 +617,46 @@ export default function AddPricePage() {
     </div>
   );
 
+  // ─── STEP: PICK PRODUCT (duplicate check UI) ─────────────────────────────
+
+  if (step === "pick_product") return (
+    <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
+      <ProgressBar value={progress} />
+      <div className="space-y-1">
+        <h2 className="font-bold text-base">Это тот же товар?</h2>
+        <p className="text-sm text-muted-foreground">
+          ИИ распознал: <strong>«{productName}»</strong>
+          <br />Мы нашли похожие товары в базе:
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {dupCandidates.map((c) => (
+          <button
+            key={c.id}
+            className="w-full flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors text-left"
+            onClick={() => pickExistingProduct(c)}
+          >
+            {c.imageUrl
+              ? <img src={c.imageUrl} alt={c.name} className="h-12 w-12 rounded-lg object-cover flex-shrink-0" />
+              : <div className="h-12 w-12 rounded-lg bg-muted flex items-center justify-center text-xl flex-shrink-0">📦</div>
+            }
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium leading-tight">{c.name}</p>
+              {c.brand && <p className="text-xs text-muted-foreground">{c.brand}</p>}
+              <p className="text-xs text-primary mt-0.5">Совпадение {c.similarity}%</p>
+            </div>
+            <CheckCircle className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+          </button>
+        ))}
+      </div>
+
+      <Button variant="outline" className="w-full" onClick={createNewProduct}>
+        Нет, это другой товар — создать новый
+      </Button>
+    </div>
+  );
+
   // ─── STEP: PRICE PHOTO ────────────────────────────────────────────────────
 
   if (step === "price_photo") return (
@@ -704,21 +810,26 @@ export default function AddPricePage() {
             {gpsCity ? `Рядом с ${gpsCity}` : "Определить моё местоположение"}
           </Button>
 
-          {/* Quick chain buttons */}
+          {/* Quick chain buttons — grouped by category */}
           {gpsCity && (
-            <div className="space-y-2">
+            <div className="space-y-3 max-h-52 overflow-y-auto pr-1">
               <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Быстрый выбор</p>
-              <div className="flex flex-wrap gap-2">
-                {QUICK_CHAINS.map((chain) => (
-                  <button
-                    key={chain}
-                    className="px-3 py-1.5 rounded-xl border text-sm font-medium hover:bg-primary hover:text-primary-foreground hover:border-primary transition-colors"
-                    onClick={() => selectQuickChain(chain)}
-                  >
-                    {chain}
-                  </button>
-                ))}
-              </div>
+              {STORE_BY_CATEGORY.map((group) => (
+                <div key={group.label}>
+                  <p className="text-xs text-muted-foreground mb-1">{group.label}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.stores.map((chain) => (
+                      <button
+                        key={chain}
+                        className="px-2.5 py-1 rounded-full border text-xs font-medium hover:bg-primary hover:text-primary-foreground hover:border-primary transition-colors"
+                        onClick={() => selectQuickChain(chain)}
+                      >
+                        {chain}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 

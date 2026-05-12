@@ -21,19 +21,65 @@ async function checkSpam(userId: string): Promise<void> {
   }
 }
 
-async function resolveProduct(productId: string | undefined, productName: string | undefined, userId: string): Promise<string> {
+async function resolveProduct(
+  productId: string | undefined,
+  productName: string | undefined,
+  userId: string,
+  barcode?: string | null,
+): Promise<string> {
+  // Already resolved by caller
   if (productId) return productId;
   if (!productName) throw Object.assign(new Error("Product required"), { statusCode: 400 });
 
-  // Try to find existing product by name (case-insensitive)
-  const existing = await prisma.product.findFirst({
+  // ── Level 1: barcode exact match (perfect dedup) ──────────────────────────
+  if (barcode) {
+    const byBarcode = await prisma.product.findFirst({
+      where: { barcode, deletedAt: null },
+    });
+    if (byBarcode) return byBarcode.id;
+  }
+
+  // ── Level 2a: exact name match (case-insensitive) ─────────────────────────
+  const exact = await prisma.product.findFirst({
     where: { name: { equals: productName, mode: "insensitive" }, deletedAt: null },
   });
-  if (existing) return existing.id;
+  if (exact) return exact.id;
 
-  // Create new product
+  // ── Level 2b: aliases array match ────────────────────────────────────────
+  const byAlias = await prisma.product.findFirst({
+    where: { aliases: { has: productName.toLowerCase() }, deletedAt: null },
+  });
+  if (byAlias) return byAlias.id;
+
+  // ── Level 2c: fuzzy match via pg_trgm (auto-resolve if very similar) ──────
+  try {
+    type FuzzyRow = { id: string; sim: number };
+    const fuzzy = await prisma.$queryRaw<FuzzyRow[]>`
+      SELECT id, similarity(name, ${productName}) AS sim
+      FROM products
+      WHERE similarity(name, ${productName}) > 0.55
+        AND deleted_at IS NULL
+      ORDER BY sim DESC
+      LIMIT 1
+    `;
+    if (fuzzy.length > 0 && fuzzy[0].sim >= 0.55) {
+      // Auto-resolve: same product, different wording
+      console.log(`[resolveProduct] fuzzy match sim=${fuzzy[0].sim.toFixed(2)} for "${productName}"`);
+      return fuzzy[0].id;
+    }
+  } catch {
+    // pg_trgm not yet available — fallback to exact only
+  }
+
+  // ── No match: create new product ─────────────────────────────────────────
   const created = await prisma.product.create({
-    data: { name: productName, createdBy: userId, aiGenerated: false, aiConfirmed: false },
+    data: {
+      name: productName,
+      barcode: barcode ?? null,
+      createdBy: userId,
+      aiGenerated: true,
+      aiConfirmed: false,
+    },
   });
   return created.id;
 }
@@ -90,6 +136,7 @@ async function resolveStore(
 export async function createPrice(data: {
   productId?: string;
   productName?: string;
+  barcode?: string | null;
   storeId?: string;
   storeName?: string;
   cityName?: string;
@@ -105,7 +152,7 @@ export async function createPrice(data: {
 }) {
   await checkSpam(data.userId);
 
-  const productId = await resolveProduct(data.productId, data.productName, data.userId);
+  const productId = await resolveProduct(data.productId, data.productName, data.userId, data.barcode);
   const storeId = await resolveStore(data.storeId, data.storeName, data.cityName, data.countryCode, data.userId);
 
   let photoUrl: string | null = null;
