@@ -2,8 +2,10 @@ import { api } from "./client";
 import type { FeedItem, PaginatedResponse, AiRecognitionResult } from "@priceradar/shared";
 
 export const pricesApi = {
-  getFeed: (params?: { country?: string; city?: string; category?: string; page?: number; limit?: number }) =>
-    api.get<PaginatedResponse<FeedItem>>("/prices/feed", { params }).then((r) => r.data),
+  getFeed: (params?: { country?: string; city?: string; cities?: string[]; category?: string; page?: number; limit?: number }) =>
+    api.get<PaginatedResponse<FeedItem>>("/prices/feed", {
+      params: params?.cities?.length ? { ...params, cities: params.cities.join(",") } : params,
+    }).then((r) => r.data),
 
   create: (formData: FormData) =>
     api.post("/prices", formData, {

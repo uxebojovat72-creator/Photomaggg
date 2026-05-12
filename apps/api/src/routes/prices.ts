@@ -54,14 +54,18 @@ export default async function priceRoutes(fastify: FastifyInstance) {
   // GET /prices/feed
   fastify.get<{
     Querystring: {
-      country?: string; city?: string; category?: string;
+      country?: string; city?: string; cities?: string | string[]; category?: string;
       page?: string; limit?: string;
     };
   }>("/feed", { preHandler: optionalAuth }, async (req, reply) => {
-    const { country, city, category, page, limit } = req.query;
+    const { country, city, cities: citiesParam, category, page, limit } = req.query;
+    const cities = citiesParam
+      ? (Array.isArray(citiesParam) ? citiesParam : citiesParam.split(",").map((c) => c.trim()).filter(Boolean))
+      : undefined;
     const result = await getPriceFeed({
       country,
       city,
+      cities,
       category,
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 20,

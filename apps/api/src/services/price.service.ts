@@ -197,12 +197,16 @@ export async function createPrice(data: {
 export async function getPriceFeed(params: {
   country?: string;
   city?: string;
+  cities?: string[];
   category?: string;
   page?: number;
   limit?: number;
 }) {
-  const { country, city, category, page = 1, limit = 20 } = params;
+  const { country, city, cities, category, page = 1, limit = 20 } = params;
   const skip = (page - 1) * limit;
+
+  // cities[] takes precedence over single city param
+  const cityList = cities && cities.length > 0 ? cities : city ? [city] : [];
 
   const where = {
     status: "approved" as const,
@@ -210,8 +214,12 @@ export async function getPriceFeed(params: {
     ...(country
       ? { store: { city: { country: { code: country.toUpperCase() } } } }
       : {}),
-    ...(city
-      ? { store: { city: { name: { contains: city, mode: "insensitive" as const } } } }
+    ...(cityList.length > 0
+      ? {
+          OR: cityList.map((c) => ({
+            store: { city: { name: { equals: c, mode: "insensitive" as const } } },
+          })),
+        }
       : {}),
     ...(category
       ? { product: { category: { name: { contains: category, mode: "insensitive" as const } } } }
