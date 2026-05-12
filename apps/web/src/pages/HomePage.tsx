@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { PlusCircle, TrendingDown } from "lucide-react";
+import { PlusCircle, TrendingDown, ReceiptText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -87,10 +87,16 @@ export default function HomePage() {
           </h1>
           <p className="text-xs text-muted-foreground">Обновляется в реальном времени</p>
         </div>
-        <Button size="sm" onClick={() => navigate("/add-price")}>
-          <PlusCircle className="h-4 w-4" />
-          Добавить цену
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => navigate("/receipt-scan")}>
+            <ReceiptText className="h-4 w-4" />
+            Сканировать чек
+          </Button>
+          <Button size="sm" onClick={() => navigate("/add-price")}>
+            <PlusCircle className="h-4 w-4" />
+            Добавить цену
+          </Button>
+        </div>
       </div>
 
       {/* Feed */}

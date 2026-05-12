@@ -42,4 +42,20 @@ export const pricesApi = {
       productUrl?: string;
       searchUrl: string;
     }>("/prices/store-lookup", { params }).then((r) => r.data),
+
+  scanReceipt: (photo: File) => {
+    const fd = new FormData();
+    fd.append("photo", photo);
+    return api.post<{ items: Array<{ name: string; brand: string | null; price: number }>; storeName: string | null }>(
+      "/ai/scan-receipt", fd, { headers: { "Content-Type": "multipart/form-data" } }
+    ).then((r) => r.data);
+  },
+
+  batchCreate: (data: {
+    storeId?: string;
+    storeName?: string;
+    cityName?: string;
+    currencyCode?: string;
+    items: Array<{ name: string; brand?: string | null; price: number }>;
+  }) => api.post<{ created: number; failed: number }>("/prices/batch", data).then((r) => r.data),
 };

@@ -145,4 +145,60 @@ export default async function productRoutes(fastify: FastifyInstance) {
       return reply.code(201).send(product);
     }
   );
+
+  // GET /products/check-duplicate?name=&barcode= — Level 3: UI duplicate check
+  fastify.get<{ Querystring: { name?: string; barcode?: string } }>(
+    "/check-duplicate",
+    async (req, reply) => {
+      const { name, barcode } = req.query;
+
+      // Level 1: barcode match (definitive)
+      if (barcode) {
+        const byBarcode = await prisma.product.findFirst({
+          where: { barcode, deletedAt: null },
+          select: { id: true, name: true, brand: true, imageUrl: true, barcode: true },
+        });
+        if (byBarcode) {
+          return reply.send({ exact: byBarcode, similar: [], matchType: "barcode" });
+        }
+      }
+
+      if (!name || name.trim().length < 2) {
+        return reply.send({ exact: null, similar: [], matchType: null });
+      }
+
+      // Level 2a: exact name match
+      const exact = await prisma.product.findFirst({
+        where: { name: { equals: name, mode: "insensitive" }, deletedAt: null },
+        select: { id: true, name: true, brand: true, imageUrl: true, barcode: true },
+      });
+      if (exact) {
+        return reply.send({ exact, similar: [], matchType: "exact" });
+      }
+
+      // Level 2c: fuzzy match via pg_trgm — return candidates for UI selection
+      try {
+        type FuzzyRow = { id: string; name: string; brand: string | null; image_url: string | null; barcode: string | null; sim: number };
+        const similar = await prisma.$queryRaw<FuzzyRow[]>`
+          SELECT id, name, brand, image_url, barcode, similarity(name, ${name}) AS sim
+          FROM products
+          WHERE similarity(name, ${name}) > 0.35
+            AND deleted_at IS NULL
+          ORDER BY sim DESC
+          LIMIT 5
+        `;
+        return reply.send({
+          exact: null,
+          similar: similar.map((r) => ({
+            id: r.id, name: r.name, brand: r.brand,
+            imageUrl: r.image_url, barcode: r.barcode,
+            similarity: Math.round(r.sim * 100),
+          })),
+          matchType: similar.length > 0 ? "fuzzy" : null,
+        });
+      } catch {
+        return reply.send({ exact: null, similar: [], matchType: null });
+      }
+    }
+  );
 }

@@ -61,4 +61,11 @@ export const productsApi = {
         searchUrl: string;
       };
     }>(`/products/barcode/${code}`, { params: storeName ? { storeName } : undefined }).then((r) => r.data),
+
+  checkDuplicate: (params: { name?: string; barcode?: string }) =>
+    api.get<{
+      exact: { id: string; name: string; brand: string | null; imageUrl: string | null; barcode: string | null } | null;
+      similar: Array<{ id: string; name: string; brand: string | null; imageUrl: string | null; similarity: number }>;
+      matchType: "barcode" | "exact" | "fuzzy" | null;
+    }>("/products/check-duplicate", { params }).then((r) => r.data),
 };
