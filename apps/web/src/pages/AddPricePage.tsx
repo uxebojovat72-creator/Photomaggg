@@ -2,12 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Camera, Upload, X, Loader2, CheckCircle, Search,
-  ArrowLeft, Plus, Barcode, MapPin, Tag, ChevronRight,
+  ArrowLeft, Plus, MapPin, Tag, ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useCamera } from "@/hooks/useCamera";
-import { useBarcode } from "@/hooks/useBarcode";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useAuthStore } from "@/store/auth.store";
 import { pricesApi } from "@/api/prices.api";
@@ -18,7 +17,7 @@ import { toast } from "@/hooks/useToast";
 import { STORE_CHAINS, CATEGORY_LABELS, type StoreChain } from "@/lib/stores-list";
 import type { Product } from "@priceradar/shared";
 
-type Step = "barcode" | "product_photo" | "pick_product" | "price_photo" | "store" | "confirm" | "done";
+type Step = "product_photo" | "pick_product" | "price_photo" | "store" | "confirm" | "done";
 
 const NEW_PRODUCT_ID = "__new__";
 const CURRENCIES = ["RUB", "USD", "EUR", "GBP", "KZT", "TRY"];
@@ -35,7 +34,7 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 
 const STEP_PROGRESS: Record<Step, number> = {
-  barcode: 15, product_photo: 35, pick_product: 50, price_photo: 60, store: 80, confirm: 95, done: 100,
+  product_photo: 20, pick_product: 45, price_photo: 60, store: 80, confirm: 95, done: 100,
 };
 
 function ProgressBar({ value }: { value: number }) {
@@ -54,10 +53,7 @@ export default function AddPricePage() {
   const { isAuthenticated } = useAuthStore();
   const { videoRef, state: cam, startCamera, capture, reset: resetCam } = useCamera();
 
-  const barcodeVideoRef = useRef<HTMLVideoElement>(null);
-  const { state: barcode, start: startBarcode, stop: stopBarcode } = useBarcode(barcodeVideoRef);
-
-  const [step, setStep] = useState<Step>("barcode");
+  const [step, setStep] = useState<Step>("product_photo");
 
   // Product
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -71,8 +67,6 @@ export default function AddPricePage() {
   const [productLoading, setProductLoading] = useState(false);
   const [productPhotoUrl, setProductPhotoUrl] = useState<string | null>(null);
   const [productPhotoFile, setProductPhotoFile] = useState<File | null>(null);
-  const [barcodeLoading, setBarcodeLoading] = useState(false);
-  const [barcodeError, setBarcodeError] = useState<string | null>(null);
 
   // Price
   const [price, setPrice] = useState("");
@@ -111,15 +105,6 @@ export default function AddPricePage() {
     }
   }, [isAuthenticated, navigate]);
 
-  // Barcode scanner — auto-start on barcode step
-  useEffect(() => {
-    if (step === "barcode") {
-      startBarcode();
-    } else {
-      stopBarcode();
-    }
-  }, [step]);
-
   // Camera — auto-start for product photo step
   useEffect(() => {
     if (step === "product_photo" && !productPhotoUrl) {
@@ -140,42 +125,6 @@ export default function AddPricePage() {
       resetCam();
     }
   }, [step]);
-
-  // Barcode scan result
-  useEffect(() => {
-    if (!barcode.result) return;
-    setBarcodeLoading(true);
-    setBarcodeError(null);
-    productsApi.lookupBarcode(barcode.result)
-      .then((data) => {
-        const p = data.product;
-        const sourceLabel = SOURCE_LABELS[data.source] ?? data.source;
-        setSelectedProduct({
-          id: data.source === "local" && p.id ? p.id : NEW_PRODUCT_ID,
-          name: p.name,
-          brand: p.brand ?? null,
-          barcode: barcode.result!,
-          categoryId: null,
-          imageUrl: p.imageUrl ?? null,
-          aiGenerated: data.source !== "local",
-          aiConfirmed: data.source === "local",
-          aliases: [],
-          createdBy: "",
-          createdAt: new Date().toISOString(),
-        });
-        setProductName(p.name);
-        setProductBrand(p.brand ?? null);
-        setProductExtra({ quantity: p.quantity, categoryHint: p.categoryHint, source: sourceLabel });
-        toast({ title: "Товар найден!", description: p.name });
-        setPricePhotoUrl(null);
-        setStep("price_photo");
-      })
-      .catch(() => {
-        setScannedBarcode(barcode.result!);
-        setBarcodeError("Не найден в базе — сфотографируйте этикетку");
-      })
-      .finally(() => setBarcodeLoading(false));
-  }, [barcode.result]);
 
   // Store search
   useEffect(() => {
@@ -441,11 +390,10 @@ export default function AddPricePage() {
 
   const resetAll = () => {
     resetCam();
-    setStep("barcode");
+    setStep("product_photo");
     setSelectedProduct(null); setProductExtra(null);
     setProductName(""); setProductBrand(null);
     setProductLoading(false); setProductPhotoUrl(null); setProductPhotoFile(null);
-    setBarcodeError(null); setBarcodeLoading(false);
     setPrice(""); setCurrency("RUB");
     setPriceLoading(false); setPricePhotoUrl(null);
     setSelectedStore(null); setStoreQuery(""); setStoreResults([]);
@@ -455,90 +403,17 @@ export default function AddPricePage() {
 
   const progress = STEP_PROGRESS[step];
 
-  // ─── STEP: BARCODE ────────────────────────────────────────────────────────
-
-  if (step === "barcode") return (
-    <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}><ArrowLeft className="h-5 w-5" /></Button>
-        <div className="flex-1">
-          <h1 className="font-bold">Добавить цену</h1>
-          <p className="text-xs text-muted-foreground">Шаг 1 — сканируем штрихкод</p>
-        </div>
-      </div>
-      <ProgressBar value={progress} />
-
-      <div className="rounded-xl border bg-card overflow-hidden relative">
-        <video
-          ref={barcodeVideoRef}
-          className="w-full aspect-[4/3] object-cover bg-black"
-          playsInline muted autoPlay
-        />
-        {/* Viewfinder overlay */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="relative w-64 h-40">
-            <div className="absolute top-0 left-0 w-8 h-8 border-white" style={{ borderWidth: "3px 0 0 3px", borderRadius: "4px 0 0 0" }} />
-            <div className="absolute top-0 right-0 w-8 h-8 border-white" style={{ borderWidth: "3px 3px 0 0", borderRadius: "0 4px 0 0" }} />
-            <div className="absolute bottom-0 left-0 w-8 h-8 border-white" style={{ borderWidth: "0 0 3px 3px", borderRadius: "0 0 0 4px" }} />
-            <div className="absolute bottom-0 right-0 w-8 h-8 border-white" style={{ borderWidth: "0 3px 3px 0", borderRadius: "0 0 4px 0" }} />
-            {(barcode.scanning || barcodeLoading) && (
-              <div
-                className="absolute left-0 right-0 h-0.5 animate-scan-line"
-                style={{ background: "linear-gradient(90deg, transparent, #ef4444 20%, #ef4444 80%, transparent)", boxShadow: "0 0 6px 2px rgba(239,68,68,0.6)" }}
-              />
-            )}
-          </div>
-        </div>
-        {barcodeLoading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 gap-2">
-            <Loader2 className="h-8 w-8 animate-spin text-white" />
-            <p className="text-white text-sm">Поиск в базах данных...</p>
-          </div>
-        )}
-      </div>
-
-      <p className="text-center text-sm text-muted-foreground">
-        {barcode.scanning ? "Наведите камеру на штрихкод товара" : barcode.error ?? "Запуск камеры..."}
-      </p>
-
-      {barcodeError && (
-        <div className="rounded-xl border border-orange-300 bg-orange-50 dark:bg-orange-950/30 p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <Barcode className="h-4 w-4 text-orange-500 flex-shrink-0" />
-            <p className="text-sm font-medium text-orange-700 dark:text-orange-300">{barcodeError}</p>
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" className="flex-1" onClick={() => { setBarcodeError(null); startBarcode(); }}>
-              Повторить
-            </Button>
-            <Button size="sm" variant="outline" className="flex-1" onClick={() => setStep("product_photo")}>
-              Фото товара →
-            </Button>
-          </div>
-        </div>
-      )}
-
-      <Button
-        variant="ghost"
-        className="w-full text-sm text-muted-foreground"
-        onClick={() => setStep("product_photo")}
-      >
-        Нет штрихкода — сфотографировать товар
-      </Button>
-    </div>
-  );
-
   // ─── STEP: PRODUCT PHOTO ──────────────────────────────────────────────────
 
   if (step === "product_photo") return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => { resetCam(); setStep("barcode"); }}>
+        <Button variant="ghost" size="icon" onClick={() => { resetCam(); navigate(-1); }}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div className="flex-1">
           <h1 className="font-bold">Фото товара</h1>
-          <p className="text-xs text-muted-foreground">Шаг 2 — AI определит название</p>
+          <p className="text-xs text-muted-foreground">Шаг 1 — AI определит название</p>
         </div>
       </div>
       <ProgressBar value={progress} />
@@ -664,13 +539,13 @@ export default function AddPricePage() {
       <div className="flex items-center gap-3">
         <Button
           variant="ghost" size="icon"
-          onClick={() => { resetCam(); setStep(selectedProduct?.barcode ? "barcode" : "product_photo"); }}
+          onClick={() => { resetCam(); setStep("product_photo"); }}
         >
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div className="flex-1">
           <h1 className="font-bold">Фото ценника</h1>
-          <p className="text-xs text-muted-foreground">Шаг 3 — AI считает цену</p>
+          <p className="text-xs text-muted-foreground">Шаг 2 — AI считает цену</p>
         </div>
       </div>
       <ProgressBar value={progress} />
@@ -795,7 +670,7 @@ export default function AddPricePage() {
         </Button>
         <div className="flex-1">
           <h1 className="font-bold">{newStoreMode ? "Новый магазин" : "Выбрать магазин"}</h1>
-          <p className="text-xs text-muted-foreground">Шаг 4 — где купили?</p>
+          <p className="text-xs text-muted-foreground">Шаг 3 — где купили?</p>
         </div>
       </div>
       <ProgressBar value={progress} />
