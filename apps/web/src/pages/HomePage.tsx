@@ -79,7 +79,7 @@ export default function HomePage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-4 space-y-4">
       {/* Hero */}
-      <div className="flex items-center justify-between">
+      <div className="space-y-3">
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2">
             <TrendingDown className="h-5 w-5 text-primary" />
@@ -87,12 +87,12 @@ export default function HomePage() {
           </h1>
           <p className="text-xs text-muted-foreground">Обновляется в реальном времени</p>
         </div>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => navigate("/receipt-scan")}>
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" onClick={() => navigate("/receipt-scan")} className="w-full">
             <ReceiptText className="h-4 w-4" />
             Сканировать чек
           </Button>
-          <Button size="sm" onClick={() => navigate("/add-price")}>
+          <Button onClick={() => navigate("/add-price")} className="w-full">
             <PlusCircle className="h-4 w-4" />
             Добавить цену
           </Button>
