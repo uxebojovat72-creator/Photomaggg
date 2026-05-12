@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Camera, Upload, CheckCircle2, Pencil, Trash2, Store, ChevronRight, Loader2, ReceiptText } from "lucide-react";
+import { Camera, CheckCircle2, Pencil, Trash2, Store, ChevronRight, Loader2, ReceiptText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { pricesApi } from "@/api/prices.api";
@@ -187,25 +187,23 @@ export default function ReceiptScanPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <div
-            className="rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 p-10 text-center cursor-pointer hover:bg-primary/10 transition-colors"
-            onClick={() => fileRef.current?.click()}
+          <button
+            className="w-full rounded-xl border-2 border-primary/40 bg-primary/5 py-16 flex flex-col items-center gap-4 hover:bg-primary/10 active:bg-primary/15 transition-colors"
+            onClick={startCamera}
           >
-            <ReceiptText className="h-12 w-12 mx-auto mb-3 text-primary/60" />
-            <p className="font-medium mb-1">Загрузить фото чека</p>
-            <p className="text-sm text-muted-foreground">Нажмите или перетащите файл</p>
-          </div>
+            <Camera className="h-14 w-14 text-primary/70" />
+            <div className="text-center">
+              <p className="font-semibold text-base">Открыть камеру</p>
+              <p className="text-sm text-muted-foreground mt-0.5">Наведите на кассовый чек</p>
+            </div>
+          </button>
           <input
             ref={fileRef}
             type="file"
             accept="image/*"
-            capture="environment"
             className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) processPhoto(f); }}
           />
-          <Button className="w-full" variant="outline" onClick={startCamera}>
-            <Camera className="h-4 w-4 mr-2" />Открыть камеру
-          </Button>
         </div>
       )}
 
