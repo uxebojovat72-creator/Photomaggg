@@ -111,7 +111,6 @@ export default function AddPricePage() {
     } else {
       stopBarcode();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
   // Camera — auto-start for product photo step
@@ -119,7 +118,6 @@ export default function AddPricePage() {
     if (step === "product_photo" && !productPhotoUrl) {
       startCamera();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, productPhotoUrl]);
 
   // Camera — auto-start for price photo step
@@ -127,7 +125,6 @@ export default function AddPricePage() {
     if (step === "price_photo" && !pricePhotoUrl) {
       startCamera();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, pricePhotoUrl]);
 
   // Stop camera when leaving camera steps
@@ -135,7 +132,6 @@ export default function AddPricePage() {
     if (step !== "product_photo" && step !== "price_photo") {
       resetCam();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
   // Barcode scan result
@@ -171,7 +167,6 @@ export default function AddPricePage() {
         setBarcodeError("Не найден в базе — сфотографируйте этикетку");
       })
       .finally(() => setBarcodeLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barcode.result]);
 
   // Store search
