@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { recognizeProduct } from "../ai/recognize.js";
+import { recognizeProduct, recognizePriceTag } from "../ai/recognize.js";
 import { authenticate } from "../middleware/auth.js";
 
 const ACCEPTED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -32,6 +32,32 @@ export default async function aiRoutes(fastify: FastifyInstance) {
 
       const buffer = Buffer.concat(chunks);
       const result = await recognizeProduct(buffer);
+      return reply.send(result);
+    }
+  );
+
+  fastify.post(
+    "/recognize-price",
+    { preHandler: authenticate },
+    async (req, reply) => {
+      const data = await req.file();
+      if (!data) {
+        return reply.code(400).send({ statusCode: 400, error: "Bad Request", message: "Photo is required" });
+      }
+      if (!ACCEPTED_MIME.has(data.mimetype)) {
+        return reply.code(400).send({ statusCode: 400, error: "Bad Request", message: "Only JPEG, PNG, WebP accepted" });
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of data.file) {
+        size += (chunk as Buffer).length;
+        if (size > MAX_SIZE) {
+          return reply.code(413).send({ statusCode: 413, error: "Payload Too Large", message: "Max 10 MB" });
+        }
+        chunks.push(chunk as Buffer);
+      }
+      const buffer = Buffer.concat(chunks);
+      const result = await recognizePriceTag(buffer);
       return reply.send(result);
     }
   );
